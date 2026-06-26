@@ -66,7 +66,7 @@ func (g *githubProvider) Sync(opts provider.Options, entries []provider.Entry) e
 	}
 	token := appCfg.ResolveGitHubToken()
 	if !opts.DryRun && token == "" {
-		return fmt.Errorf("GITHUB_TOKEN が未設定です")
+		return fmt.Errorf("GITHUB_TOKEN が未設定です（環境変数 GITHUB_TOKEN または config ファイルの github.token で指定してください）")
 	}
 
 	// ---- リポジトリ解決 ----

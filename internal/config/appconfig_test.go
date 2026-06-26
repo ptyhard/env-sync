@@ -279,17 +279,16 @@ vercel:
 		t.Fatal(err)
 	}
 	os.Stderr = w
-	t.Cleanup(func() {
-		os.Stderr = origStderr
-		r.Close()
-	})
 
 	_, loadErr := config.LoadAppConfig()
 
+	// LoadAppConfig 呼び出し直後に復元し、並列実行時の stdout/stderr 混入を防ぐ
 	w.Close()
+	os.Stderr = origStderr
 
 	buf := make([]byte, 4096)
 	n, _ := r.Read(buf)
+	r.Close()
 	output := string(buf[:n])
 
 	if loadErr != nil {
@@ -325,17 +324,16 @@ vercel:
 		t.Fatal(err)
 	}
 	os.Stderr = w
-	t.Cleanup(func() {
-		os.Stderr = origStderr
-		r.Close()
-	})
 
 	_, loadErr := config.LoadAppConfig()
 
+	// LoadAppConfig 呼び出し直後に復元し、並列実行時の stdout/stderr 混入を防ぐ
 	w.Close()
+	os.Stderr = origStderr
 
 	buf := make([]byte, 4096)
 	n, _ := r.Read(buf)
+	r.Close()
 	output := string(buf[:n])
 
 	if loadErr != nil {

@@ -55,7 +55,7 @@ func (v *vercelProvider) Sync(opts provider.Options, entries []provider.Entry) e
 		}
 	}
 	if !opts.DryRun && token == "" {
-		return fmt.Errorf("VERCEL_TOKEN が未設定です")
+		return fmt.Errorf("VERCEL_TOKEN が未設定です（環境変数 VERCEL_TOKEN または config ファイルの vercel.token で指定してください）")
 	}
 	if projectID == "" {
 		return fmt.Errorf("VERCEL_PROJECT_ID が未設定で .vercel/project.json もありません（先に vercel link するか指定してください）")
