@@ -8,6 +8,16 @@
 #           - sensitive : 保存後は値を読めないシークレット向け
 #           - plain     : 暗号化なしの平文
 #   target: production | preview | development の配列
+#
+# GitHub Actions モード（--provider github）での追加フィールド:
+#   kind:   secret | variable
+#           - secret   : GitHub Actions Secrets として登録（sealed box 暗号化）
+#           - variable : GitHub Actions Variables として登録（平文）
+#           ※ 未指定時のデフォルトは secret（安全側）
+#
+# 例（GitHub モード）:
+#   MY_SECRET:   { kind: secret }
+#   PUBLIC_FLAG: { kind: variable }
 
 defaults:
   target: [production, preview]

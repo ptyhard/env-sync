@@ -1,7 +1,8 @@
 # vercel-env-sync
 
-定義ファイル `vercel-env.yaml` で宣言した環境変数を Vercel へ **一括登録（同期）** する Go 製 CLI。
+定義ファイル `vercel-env.yaml` で宣言した環境変数を **Vercel** または **GitHub Actions** へ一括登録（同期）する Go 製 CLI。
 Vercel REST API (`POST /v10/projects/{id}/env?upsert=true`) を使うため、再実行すると既存の変数は **更新（upsert）** される。
+GitHub Actions では Secrets（sealed box 暗号化）と Variables（平文）の両方に対応する。
 
 [ptyhard/arg-next の `scripts/vercel-env-push.mjs`](../arg-next/scripts/vercel-env-push.mjs) と同じ仕様を Go で実装したもの。
 
@@ -128,11 +129,59 @@ VERCEL_TOKEN=xxxxx ./vercel-env-sync --env .env.production --yes
 
 | 項目 | 必須 | 説明 |
 |------|------|------|
+| `--provider vercel\|github` | – | 同期先（デフォルト `vercel`） |
 | `--env <file>` | – | 値を読む env ファイル（デフォルト `.env`） |
 | `--def <file>` | – | type/target 定義 YAML（デフォルト `vercel-env.yaml`） |
 | `--dry-run` | – | 送信せず登録予定のみ表示 |
 | `--yes` / `-y` | – | 送信前の確認をスキップ |
+| `--github-env <name>` | – | GitHub Actions の Environment スコープ（未指定はリポジトリレベル） |
 | `--force` | – | `init` 時に既存の def ファイルを上書きする |
-| `VERCEL_TOKEN` | ◯ | Vercel アクセストークン（dry-run 時は不要） |
-| `VERCEL_PROJECT_ID` | △ | プロジェクト ID。未指定なら `.vercel/project.json` から自動取得 |
-| `VERCEL_TEAM_ID` | – | チーム(Org) ID。未指定なら `.vercel/project.json` の `orgId` |
+| `VERCEL_TOKEN` | ◯(Vercel) | Vercel アクセストークン（dry-run 時は不要） |
+| `VERCEL_PROJECT_ID` | △(Vercel) | プロジェクト ID。未指定なら `.vercel/project.json` から自動取得 |
+| `VERCEL_TEAM_ID` | –(Vercel) | チーム(Org) ID。未指定なら `.vercel/project.json` の `orgId` |
+| `GITHUB_TOKEN` | ◯(GitHub) | GitHub アクセストークン（dry-run 時は不要） |
+| `GITHUB_REPO` | –(GitHub) | `owner/repo` 形式。未指定なら `git remote origin` から自動取得 |
+
+## GitHub Actions モード
+
+`--provider github` を指定すると GitHub Actions の Secrets/Variables に同期します。
+
+```bash
+# dry-run（送信せず key / kind だけ確認。値は表示されない）
+GITHUB_REPO=owner/repo ./vercel-env-sync --provider github --env .env.production --dry-run
+
+# 本番投入（リポジトリレベル）
+GITHUB_TOKEN=xxxxx GITHUB_REPO=owner/repo ./vercel-env-sync --provider github --env .env.production
+
+# Environment スコープに登録
+GITHUB_TOKEN=xxxxx ./vercel-env-sync --provider github --github-env production --env .env.production
+
+# 確認をスキップ（CI など）
+GITHUB_TOKEN=xxxxx ./vercel-env-sync --provider github --yes --env .env.production
+```
+
+### `kind` フィールド
+
+`vercel-env.yaml` の各変数に `kind` を追加することで登録先を制御します。
+
+```yaml
+defaults:
+  kind: secret   # 未指定時のデフォルト（安全側）
+
+variables:
+  DATABASE_URL:
+    kind: secret    # GitHub Actions Secrets として登録（sealed box 暗号化）
+  PUBLIC_FLAG:
+    kind: variable  # GitHub Actions Variables として登録（平文）
+```
+
+| kind | 登録先 | 暗号化 | 説明 |
+|------|--------|--------|------|
+| `secret` | GitHub Actions Secrets | sealed box (NaCl) | 登録後は値を閲覧不可 |
+| `variable` | GitHub Actions Variables | なし（平文） | 値は GitHub UI で確認可能 |
+
+### セキュリティ
+
+- 秘密値（`kind: secret`）は **GitHub の公開鍵で sealed box 暗号化**してから PUT します。平文は送信しません。
+- 登録対象の一覧表示・確認プロンプト・成否ログのいずれにも **値は出力されません**。`--dry-run` でも同様。
+- 公開鍵の長さ（32 バイト）を検証し、不正な鍵では処理を中止します。
