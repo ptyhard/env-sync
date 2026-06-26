@@ -147,7 +147,7 @@ VERCEL_TOKEN=xxxxx ./env-sync --env .env.production --yes
 
 | 項目 | 必須 | 説明 |
 |------|------|------|
-| `--provider vercel\|github` | – | 同期先（デフォルト `vercel`） |
+| `--provider <name>` | – | 同期先（デフォルト `vercel`）。現在 `vercel` / `github` が利用可 |
 | `--env <file>` | – | 値を読む env ファイル（デフォルト `.env`） |
 | `--def <file>` | – | 定義 YAML（デフォルト `env-sync.yaml`） |
 | `--dry-run` | – | 送信せず登録予定のみ表示 |

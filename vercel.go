@@ -95,7 +95,10 @@ func (v *vercelProvider) Sync(opts options, entries []Entry) error {
 	}
 
 	// ---- 送信 ----
-	u, _ := url.Parse(fmt.Sprintf("%s/v10/projects/%s/env", apiBase, projectID))
+	u, err := url.Parse(fmt.Sprintf("%s/v10/projects/%s/env", apiBase, projectID))
+	if err != nil {
+		return die("URL の組み立てに失敗: %s", err)
+	}
 	q := u.Query()
 	q.Set("upsert", "true")
 	if teamID != "" {
