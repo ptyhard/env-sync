@@ -3,3 +3,5 @@
 .env
 .env.*
 .vercel/
+# Added by goreleaser init:
+dist/
