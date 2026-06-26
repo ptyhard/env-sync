@@ -1,0 +1,20 @@
+# Vercel に登録する環境変数の type / target 定義。
+#
+# 値はこのファイルには書かない（git にコミットされるため）。値は .env(.production) から取得する。
+# ここに宣言が無いキーは登録されない（.env にあっても警告のうえスキップされる）。
+#
+#   type:   plain | encrypted | sensitive
+#           - encrypted : ダッシュボードで値を再表示できる通常の Variables
+#           - sensitive : 保存後は値を読めないシークレット向け
+#           - plain     : 暗号化なしの平文
+#   target: production | preview | development の配列
+
+defaults:
+  target: [production, preview]
+  type: sensitive
+
+variables:
+  # ---- 例 ----
+  # NEXT_PUBLIC_API_BASE_URL: { type: encrypted }
+  # DATABASE_URL:             { type: sensitive }
+  # DEBUG_FLAG:               { type: encrypted, target: [development] }
