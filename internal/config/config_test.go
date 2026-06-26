@@ -111,7 +111,10 @@ func TestParseFlags_VersionFn_Called(t *testing.T) {
 						done <- called
 					}
 				}()
-				config.ParseFlags([]string{arg}, nil, func() { called = true })
+				config.ParseFlags([]string{arg}, nil, func() {
+					called = true
+					panic("stop-before-os-exit") // os.Exit(0) に到達させない
+				})
 				done <- called
 			}()
 			if got := <-done; !got {

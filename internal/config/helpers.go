@@ -8,9 +8,10 @@ import (
 )
 
 // FileExists はパスが存在するかを返す。
+// 権限エラー等で stat できない場合も true を返し、存在しない場合のみ false を返す。
 func FileExists(path string) bool {
 	_, err := os.Stat(path)
-	return err == nil
+	return !os.IsNotExist(err)
 }
 
 // IsTTY はファイルディスクリプタが端末かを返す。

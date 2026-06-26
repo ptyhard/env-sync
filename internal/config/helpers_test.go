@@ -6,8 +6,6 @@ import (
 )
 
 func TestFileExists_Exists(t *testing.T) {
-	// go.mod は必ず存在するファイルとして使用する。
-	// テストはモジュールルートから実行されるため相対パスが通る。
 	f, err := os.CreateTemp(t.TempDir(), "exists-*.txt")
 	if err != nil {
 		t.Skip("一時ファイル作成失敗")
@@ -61,12 +59,21 @@ func TestSortedStrKeys(t *testing.T) {
 }
 
 func TestFileExists_PermError(t *testing.T) {
-	f, err := os.CreateTemp(t.TempDir(), "test-*.txt")
+	if os.Getuid() == 0 {
+		t.Skip("root では権限エラーを再現できない")
+	}
+	dir := t.TempDir()
+	f, err := os.CreateTemp(dir, "perm-*.txt")
 	if err != nil {
 		t.Skip("一時ファイル作成失敗")
 	}
 	f.Close()
+	// ファイルのパーミッションを 000 にして読み取り不能にする
+	if err := os.Chmod(f.Name(), 0o000); err != nil {
+		t.Skip("chmod 失敗")
+	}
+	// ファイルは存在するが stat でアクセスできない → FileExists は true を返すべき
 	if !FileExists(f.Name()) {
-		t.Errorf("FileExists(一時ファイル) = false, want true")
+		t.Error("FileExists(権限なしファイル) = false, want true（ファイルは存在する）")
 	}
 }
