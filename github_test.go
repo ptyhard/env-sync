@@ -204,97 +204,92 @@ func TestEncryptSecret_EmptyValue(t *testing.T) {
 	}
 }
 
-// --- parseFlags の provider / github-env 解析テスト ---
+// --- 新スキーマ（secret/environments）の YAML パーステスト ---
 
-func TestParseFlags_DefaultProvider(t *testing.T) {
-	opts := parseFlags([]string{})
-	if opts.provider != "vercel" {
-		t.Errorf("provider のデフォルト = %q, want %q", opts.provider, "vercel")
-	}
-}
-
-func TestParseFlags_ProviderVercel(t *testing.T) {
-	opts := parseFlags([]string{"--provider", "vercel"})
-	if opts.provider != "vercel" {
-		t.Errorf("provider = %q, want vercel", opts.provider)
-	}
-}
-
-func TestParseFlags_ProviderGitHub(t *testing.T) {
-	opts := parseFlags([]string{"--provider", "github"})
-	if opts.provider != "github" {
-		t.Errorf("provider = %q, want github", opts.provider)
-	}
-}
-
-func TestParseFlags_ProviderEqualForm(t *testing.T) {
-	opts := parseFlags([]string{"--provider=github"})
-	if opts.provider != "github" {
-		t.Errorf("--provider=github が解析されない: got %q", opts.provider)
-	}
-}
-
-func TestParseFlags_GithubEnvFlag(t *testing.T) {
-	opts := parseFlags([]string{"--github-env", "production"})
-	if opts.githubEnv != "production" {
-		t.Errorf("--github-env = %q, want production", opts.githubEnv)
-	}
-}
-
-func TestParseFlags_GithubEnvEqualForm(t *testing.T) {
-	opts := parseFlags([]string{"--github-env=staging"})
-	if opts.githubEnv != "staging" {
-		t.Errorf("--github-env=staging が解析されない: got %q", opts.githubEnv)
-	}
-}
-
-func TestParseFlags_DefaultGithubEnv(t *testing.T) {
-	opts := parseFlags([]string{})
-	if opts.githubEnv != "" {
-		t.Errorf("githubEnv のデフォルト = %q, want empty", opts.githubEnv)
-	}
-}
-
-func TestParseFlags_CombinedWithExistingFlags(t *testing.T) {
-	opts := parseFlags([]string{"--provider", "github", "--github-env", "production", "--dry-run", "--yes"})
-	if opts.provider != "github" {
-		t.Errorf("provider = %q, want github", opts.provider)
-	}
-	if opts.githubEnv != "production" {
-		t.Errorf("githubEnv = %q, want production", opts.githubEnv)
-	}
-	if !opts.dryRun {
-		t.Error("dryRun が false")
-	}
-	if !opts.yes {
-		t.Error("yes が false")
-	}
-}
-
-// --- varConf / definition の Kind フィールドテスト ---
-
-func TestVarConf_KindField(t *testing.T) {
+func TestVarConf_SecretEnvironmentsField(t *testing.T) {
 	yamlText := `
 defaults:
-  kind: secret
+  secret: true
+  environments: [production, preview]
 variables:
   MY_SECRET:
-    kind: secret
+    secret: true
   MY_VAR:
-    kind: variable
+    secret: false
+    environments: [development]
 `
 	var def definition
 	if err := yaml.Unmarshal([]byte(yamlText), &def); err != nil {
 		t.Fatalf("YAML パース失敗: %v", err)
 	}
 
-	if def.Defaults.Kind != "secret" {
-		t.Errorf("defaults.kind = %q, want secret", def.Defaults.Kind)
+	if def.Defaults.Secret == nil || !*def.Defaults.Secret {
+		t.Errorf("defaults.secret = nil or false, want true")
 	}
-	if def.Variables["MY_SECRET"].Kind != "secret" {
-		t.Errorf("MY_SECRET.kind = %q, want secret", def.Variables["MY_SECRET"].Kind)
+	if len(def.Defaults.Environments) != 2 {
+		t.Errorf("defaults.environments len = %d, want 2", len(def.Defaults.Environments))
 	}
-	if def.Variables["MY_VAR"].Kind != "variable" {
-		t.Errorf("MY_VAR.kind = %q, want variable", def.Variables["MY_VAR"].Kind)
+	if def.Variables["MY_SECRET"].Secret == nil || !*def.Variables["MY_SECRET"].Secret {
+		t.Errorf("MY_SECRET.secret = nil or false, want true")
+	}
+	if def.Variables["MY_VAR"].Secret == nil || *def.Variables["MY_VAR"].Secret {
+		t.Errorf("MY_VAR.secret = nil or true, want false")
+	}
+	if len(def.Variables["MY_VAR"].Environments) != 1 || def.Variables["MY_VAR"].Environments[0] != "development" {
+		t.Errorf("MY_VAR.environments = %v, want [development]", def.Variables["MY_VAR"].Environments)
+	}
+}
+
+// --- expandGitHubTasks のテスト ---
+
+func TestExpandGitHubTasks_EmptyEnvironments_RepoLevel(t *testing.T) {
+	entries := []Entry{
+		{Key: "FOO", Value: "bar", Secret: true, Environments: nil},
+	}
+	tasks := expandGitHubTasks(entries)
+	if len(tasks) != 1 {
+		t.Fatalf("tasks len = %d, want 1", len(tasks))
+	}
+	if tasks[0].envScope != "" {
+		t.Errorf("envScope = %q, want empty (repo level)", tasks[0].envScope)
+	}
+	if tasks[0].entry.Key != "FOO" {
+		t.Errorf("entry.Key = %q, want FOO", tasks[0].entry.Key)
+	}
+}
+
+func TestExpandGitHubTasks_MultipleEnvironments(t *testing.T) {
+	entries := []Entry{
+		{Key: "FOO", Value: "bar", Secret: false, Environments: []string{"production", "staging"}},
+	}
+	tasks := expandGitHubTasks(entries)
+	if len(tasks) != 2 {
+		t.Fatalf("tasks len = %d, want 2", len(tasks))
+	}
+	if tasks[0].envScope != "production" {
+		t.Errorf("tasks[0].envScope = %q, want production", tasks[0].envScope)
+	}
+	if tasks[1].envScope != "staging" {
+		t.Errorf("tasks[1].envScope = %q, want staging", tasks[1].envScope)
+	}
+}
+
+func TestExpandGitHubTasks_MixedEntries(t *testing.T) {
+	entries := []Entry{
+		{Key: "REPO_SECRET", Value: "s1", Secret: true, Environments: nil},
+		{Key: "ENV_VAR", Value: "v1", Secret: false, Environments: []string{"production", "preview"}},
+	}
+	tasks := expandGitHubTasks(entries)
+	if len(tasks) != 3 {
+		t.Fatalf("tasks len = %d, want 3", len(tasks))
+	}
+	if tasks[0].envScope != "" || tasks[0].entry.Key != "REPO_SECRET" {
+		t.Errorf("tasks[0] = {%q, %q}, want {, REPO_SECRET}", tasks[0].envScope, tasks[0].entry.Key)
+	}
+	if tasks[1].envScope != "production" || tasks[1].entry.Key != "ENV_VAR" {
+		t.Errorf("tasks[1] = {%q, %q}, want {production, ENV_VAR}", tasks[1].envScope, tasks[1].entry.Key)
+	}
+	if tasks[2].envScope != "preview" || tasks[2].entry.Key != "ENV_VAR" {
+		t.Errorf("tasks[2] = {%q, %q}, want {preview, ENV_VAR}", tasks[2].envScope, tasks[2].entry.Key)
 	}
 }
