@@ -349,6 +349,7 @@ func printUsage() {
   --def <file>   type/target 定義 YAML（デフォルト vercel-env.yaml）
   --dry-run      送信せず登録予定の key/type/target だけ表示
   --yes, -y      送信前の確認をスキップ
+  --version      バージョン情報を表示して終了
   -h, --help     このヘルプを表示
 
 環境変数:
