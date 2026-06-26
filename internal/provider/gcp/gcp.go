@@ -112,7 +112,7 @@ func (g *gcpProvider) Sync(opts provider.Options, entries []provider.Entry) erro
 		if !config.IsTTY(os.Stdin) {
 			return fmt.Errorf("対話できない環境です。確認をスキップするには --yes を付けてください")
 		}
-		fmt.Print("上記を GCP Secret Manager に登録します（既存は上書き）。続行しますか? (y/N) ")
+		fmt.Print("上記を GCP Secret Manager に同期します（新しいバージョンとして追加）。続行しますか? (y/N) ")
 		reader := bufio.NewReader(os.Stdin)
 		line, _ := reader.ReadString('\n')
 		ans := strings.ToLower(strings.TrimSpace(line))
@@ -149,6 +149,8 @@ func (g *gcpProvider) Sync(opts provider.Options, entries []provider.Entry) erro
 
 // syncSecret は 1 件のエントリを Secret Manager に同期する。
 // secret が存在しなければ作成し、存在すれば labels を更新する。その後バージョンを追加する。
+// GetSecret → CreateSecret の間に別プロセスが同名 secret を作成した場合（AlreadyExists）は
+// 競合を無視してバージョン追加へ進む（再実行・並行実行に強い挙動）。
 func syncSecret(ctx context.Context, client secretManagerClient, projectID string, e provider.Entry) error {
 	secretName := fmt.Sprintf("projects/%s/secrets/%s", projectID, e.Key)
 	parent := fmt.Sprintf("projects/%s", projectID)
@@ -170,12 +172,15 @@ func syncSecret(ctx context.Context, client secretManagerClient, projectID strin
 			},
 			Labels: labels,
 		}
-		if _, err = client.CreateSecret(ctx, &secretmanagerpb.CreateSecretRequest{
+		if _, createErr := client.CreateSecret(ctx, &secretmanagerpb.CreateSecretRequest{
 			Parent:   parent,
 			SecretId: e.Key,
 			Secret:   secret,
-		}); err != nil {
-			return fmt.Errorf("Secret の作成に失敗: %s", err)
+		}); createErr != nil {
+			// 競合（別プロセスが同時に作成した場合）は無視してバージョン追加へ進む
+			if cst, ok2 := status.FromError(createErr); !ok2 || cst.Code() != codes.AlreadyExists {
+				return fmt.Errorf("Secret の作成に失敗: %s", createErr)
+			}
 		}
 	} else if len(labels) > 0 {
 		// 既存 secret の labels を更新する
