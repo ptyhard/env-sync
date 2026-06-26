@@ -54,7 +54,13 @@ func withGitHubAPIBase(t *testing.T, base string) {
 
 ## ファイル配置
 
-- 実装と**同階層・同パッケージ**（`package main`）に `<対象>_test.go` を置く（`config_test.go` / `entry_test.go` / `provider_test.go` / `vercel_test.go` / `github_test.go` / `dotenv_test.go` / `helpers_test.go` / `init_test.go`）。
+- 実装と**同階層・同パッケージ**に `<対象>_test.go` を置く。各テストは対応する実装パッケージに同居する：
+  - `internal/config/` … `config_test.go` / `dotenv_test.go` / `helpers_test.go` / `init_test.go`
+  - `internal/sync/` … `entry_test.go`
+  - `internal/provider/` … `provider_test.go`
+  - `internal/provider/vercel/` … `vercel_test.go`
+  - `internal/provider/github/` … `github_test.go` / `github_integration_test.go`
+  - `cmd/env-sync/` … `main_test.go`（ビルドしたバイナリの統合テスト）
 - GitHub 系は純粋ヘルパーの `github_test.go` と、httptest を使う `github_integration_test.go` に分ける。
 - テスト関数は `TestXxx_条件`（例: `TestParseFlags_DryRun`, `TestGitHubPublicKey_EnvironmentScope`）。
 - アサーションは `if got != want { t.Errorf("... got %q, want %q", got, want) }` の形。メッセージは**日本語**。

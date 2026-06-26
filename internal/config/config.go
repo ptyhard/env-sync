@@ -1,4 +1,5 @@
-package main
+// Package config はコマンドラインフラグ・定義 YAML モデル・dotenv パーサ・汎用ヘルパーを提供する。
+package config
 
 import (
 	"fmt"
@@ -6,14 +7,17 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/ptyhard/env-sync/internal/provider"
 )
 
-// ProviderVal はYAMLで string か []string を受け付ける provider フィールドの型。
+// ProviderVal は YAML で string か []string を受け付ける provider フィールドの型。
 // `provider: vercel` でも `provider: [vercel, github]` でも解析できる。
 type ProviderVal struct {
 	Values []string
 }
 
+// UnmarshalYAML は ProviderVal の YAML デシリアライズを実装する。
 func (p *ProviderVal) UnmarshalYAML(value *yaml.Node) error {
 	switch value.Kind {
 	case yaml.ScalarNode:
@@ -30,38 +34,30 @@ func (p *ProviderVal) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
-const apiBase = "https://api.vercel.com"
-
-// options はコマンドラインフラグの値を保持する。
-type options struct {
-	env      string
-	def      string
-	dryRun   bool
-	yes      bool
-	provider string
-}
-
-// varConf は定義 YAML の variables 配下 1 件分の設定。
-type varConf struct {
+// VarConf は定義 YAML の variables 配下 1 件分の設定。
+type VarConf struct {
 	Secret       *bool        `yaml:"secret"`
 	Environments []string     `yaml:"environments"`
 	Provider     *ProviderVal `yaml:"provider"`
 }
 
-// definition は定義 YAML 全体の構造。
-type definition struct {
+// Definition は定義 YAML 全体の構造。
+type Definition struct {
 	Defaults struct {
 		Secret       *bool        `yaml:"secret"`
 		Environments []string     `yaml:"environments"`
 		Provider     *ProviderVal `yaml:"provider"`
 	} `yaml:"defaults"`
-	Variables map[string]varConf `yaml:"variables"`
+	Variables map[string]VarConf `yaml:"variables"`
 }
 
-// parseFlags はコマンドライン引数を解析する。flag パッケージは特殊な
-// 短縮形 (-y) と長形 (--yes) の両立や --dry-run の扱いが煩雑なため手で処理する。
-func parseFlags(argv []string) options {
-	opts := options{env: ".env", def: "env-sync.yaml", provider: "vercel"}
+// ParseFlags はコマンドライン引数を解析して Options を返す。
+// flag パッケージは特殊な短縮形 (-y) と長形 (--yes) の両立や --dry-run の扱いが
+// 煩雑なため手で処理する。
+// --help / 不明な引数は printUsageFn を呼んで os.Exit する。
+// --version は引数の出現順に処理され versionFn を呼んで os.Exit(0) する。
+func ParseFlags(argv []string, printUsageFn func(), versionFn func()) provider.Options {
+	opts := provider.Options{Env: ".env", Def: "env-sync.yaml", Provider: "vercel"}
 	for i := 0; i < len(argv); i++ {
 		arg := argv[i]
 		next := func() string {
@@ -74,50 +70,50 @@ func parseFlags(argv []string) options {
 		}
 		switch {
 		case arg == "--env" || arg == "-env":
-			opts.env = next()
+			opts.Env = next()
 		case strings.HasPrefix(arg, "--env="):
-			opts.env = strings.TrimPrefix(arg, "--env=")
+			opts.Env = strings.TrimPrefix(arg, "--env=")
 		case arg == "--def" || arg == "-def":
-			opts.def = next()
+			opts.Def = next()
 		case strings.HasPrefix(arg, "--def="):
-			opts.def = strings.TrimPrefix(arg, "--def=")
+			opts.Def = strings.TrimPrefix(arg, "--def=")
 		case arg == "--dry-run" || arg == "-dry-run":
-			opts.dryRun = true
+			opts.DryRun = true
 		case arg == "--yes" || arg == "-yes" || arg == "-y":
-			opts.yes = true
-		case arg == "--version" || arg == "-version":
-			fmt.Printf("env-sync version %s (commit: %s, built: %s)\n", version, commit, date)
-			os.Exit(0)
+			opts.Yes = true
 		case arg == "--provider" || arg == "-provider":
 			v := next()
-			if !isRegisteredProvider(v) {
-				names := strings.Join(registeredProviderNames(), " または ")
+			if !provider.IsRegisteredProvider(v) {
+				names := strings.Join(provider.RegisteredProviderNames(), " または ")
 				fmt.Fprintf(os.Stderr, "エラー: --provider には %s を指定してください\n", names)
 				os.Exit(1)
 			}
-			opts.provider = v
+			opts.Provider = v
 		case strings.HasPrefix(arg, "--provider="):
 			v := strings.TrimPrefix(arg, "--provider=")
-			if !isRegisteredProvider(v) {
-				names := strings.Join(registeredProviderNames(), " または ")
+			if !provider.IsRegisteredProvider(v) {
+				names := strings.Join(provider.RegisteredProviderNames(), " または ")
 				fmt.Fprintf(os.Stderr, "エラー: --provider には %s を指定してください\n", names)
 				os.Exit(1)
 			}
-			opts.provider = v
+			opts.Provider = v
+		case arg == "--version" || arg == "-version":
+			if versionFn != nil {
+				versionFn()
+			}
+			os.Exit(0)
 		case arg == "-h" || arg == "--help":
-			printUsage()
+			if printUsageFn != nil {
+				printUsageFn()
+			}
 			os.Exit(0)
 		default:
 			fmt.Fprintf(os.Stderr, "エラー: 不明な引数: %s\n", arg)
-			printUsage()
+			if printUsageFn != nil {
+				printUsageFn()
+			}
 			os.Exit(1)
 		}
 	}
 	return opts
-}
-
-// isRegisteredProvider は name が registry に登録されているかを返す。
-func isRegisteredProvider(name string) bool {
-	_, ok := providerRegistry[name]
-	return ok
 }

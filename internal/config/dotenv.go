@@ -1,9 +1,9 @@
-package main
+package config
 
 import "strings"
 
-// parseDotenv は .env テキストを key=value のマップに展開する。
-func parseDotenv(text string) map[string]string {
+// ParseDotenv は .env テキストを key=value のマップに展開する。
+func ParseDotenv(text string) map[string]string {
 	out := map[string]string{}
 	for _, raw := range strings.Split(text, "\n") {
 		line := strings.TrimSuffix(raw, "\r")

@@ -1,4 +1,5 @@
-package main
+// Package vercel は Vercel REST API への環境変数同期を実装する provider。
+package vercel
 
 import (
 	"bufio"
@@ -11,10 +12,15 @@ import (
 	"net/url"
 	"os"
 	"strings"
+
+	"github.com/ptyhard/env-sync/internal/config"
+	"github.com/ptyhard/env-sync/internal/provider"
 )
 
+const apiBase = "https://api.vercel.com"
+
 func init() {
-	registerProvider("vercel", func() Provider { return &vercelProvider{} })
+	provider.RegisterProvider("vercel", func() provider.Provider { return &vercelProvider{} })
 }
 
 // vercelProvider は Vercel への同期を担当する Provider 実装。
@@ -23,7 +29,7 @@ type vercelProvider struct{}
 func (v *vercelProvider) Name() string { return "vercel" }
 
 // Sync は Vercel への環境変数同期を行う。
-func (v *vercelProvider) Sync(opts options, entries []Entry) error {
+func (v *vercelProvider) Sync(opts provider.Options, entries []provider.Entry) error {
 	// ---- 認証情報 / プロジェクト ----
 	token := os.Getenv("VERCEL_TOKEN")
 	projectID := os.Getenv("VERCEL_PROJECT_ID")
@@ -31,12 +37,12 @@ func (v *vercelProvider) Sync(opts options, entries []Entry) error {
 	if projectID == "" {
 		pjText, err := os.ReadFile(".vercel/project.json")
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return die(".vercel/project.json の読み込みに失敗: %s", err)
+			return fmt.Errorf(".vercel/project.json の読み込みに失敗: %s", err)
 		}
 		if err == nil {
 			var pj projectJSON
 			if err := json.Unmarshal(pjText, &pj); err != nil {
-				return die(".vercel/project.json の JSON パースに失敗: %s", err)
+				return fmt.Errorf(".vercel/project.json の JSON パースに失敗: %s", err)
 			}
 			projectID = pj.ProjectID
 			if teamID == "" {
@@ -44,11 +50,11 @@ func (v *vercelProvider) Sync(opts options, entries []Entry) error {
 			}
 		}
 	}
-	if !opts.dryRun && token == "" {
-		return die("VERCEL_TOKEN が未設定です")
+	if !opts.DryRun && token == "" {
+		return fmt.Errorf("VERCEL_TOKEN が未設定です")
 	}
 	if projectID == "" {
-		return die("VERCEL_PROJECT_ID が未設定で .vercel/project.json もありません（先に vercel link するか指定してください）")
+		return fmt.Errorf("VERCEL_PROJECT_ID が未設定で .vercel/project.json もありません（先に vercel link するか指定してください）")
 	}
 
 	// ---- 登録対象を組み立て ----
@@ -58,7 +64,7 @@ func (v *vercelProvider) Sync(opts options, entries []Entry) error {
 	}
 
 	// ---- 登録対象を一覧表示 ----
-	fmt.Printf("対象プロジェクト: %s  (env: %s, def: %s)\n", projectID, opts.env, opts.def)
+	fmt.Printf("対象プロジェクト: %s  (env: %s, def: %s)\n", projectID, opts.Env, opts.Def)
 	fmt.Printf("登録対象 %d 件 (既存は upsert で上書き):\n", len(items))
 	for _, it := range items {
 		tj, _ := json.Marshal(it.Target)
@@ -74,15 +80,15 @@ func (v *vercelProvider) Sync(opts options, entries []Entry) error {
 		fmt.Println("登録対象がありません")
 		return nil
 	}
-	if opts.dryRun {
+	if opts.DryRun {
 		fmt.Println("[dry-run] 送信しません")
 		return nil
 	}
 
 	// ---- 確認 ----
-	if !opts.yes {
-		if !isTTY(os.Stdin) {
-			return die("対話できない環境です。確認をスキップするには --yes を付けてください")
+	if !opts.Yes {
+		if !config.IsTTY(os.Stdin) {
+			return fmt.Errorf("対話できない環境です。確認をスキップするには --yes を付けてください")
 		}
 		fmt.Print("上記を Vercel に登録します（既存は上書き）。続行しますか? (y/N) ")
 		reader := bufio.NewReader(os.Stdin)
@@ -97,7 +103,7 @@ func (v *vercelProvider) Sync(opts options, entries []Entry) error {
 	// ---- 送信 ----
 	u, err := url.Parse(fmt.Sprintf("%s/v10/projects/%s/env", apiBase, projectID))
 	if err != nil {
-		return die("URL の組み立てに失敗: %s", err)
+		return fmt.Errorf("URL の組み立てに失敗: %s", err)
 	}
 	q := u.Query()
 	q.Set("upsert", "true")
@@ -151,7 +157,7 @@ func (v *vercelProvider) Sync(opts options, entries []Entry) error {
 // Secret=true → type:"sensitive"、false → type:"plain"
 // Environments が空なら [production, preview] をデフォルト適用。
 // Environments の値が production/preview/development 以外なら error を返す。
-func entriesToVercelItems(entries []Entry) ([]item, error) {
+func entriesToVercelItems(entries []provider.Entry) ([]item, error) {
 	validTargets := map[string]bool{
 		"production":  true,
 		"preview":     true,
@@ -172,7 +178,7 @@ func entriesToVercelItems(entries []Entry) ([]item, error) {
 
 		for _, t := range target {
 			if !validTargets[t] {
-				return nil, die("%s: 不正な environments %q（production / preview / development）", e.Key, t)
+				return nil, fmt.Errorf("%s: 不正な environments %q（production / preview / development）", e.Key, t)
 			}
 		}
 

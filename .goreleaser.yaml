@@ -9,7 +9,7 @@ before:
 builds:
   - id: env-sync
     binary: env-sync
-    main: .
+    main: ./cmd/env-sync
     env:
       - CGO_ENABLED=0
     goos:
@@ -20,9 +20,9 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X main.version={{.Version}}
-      - -X main.commit={{.Commit}}
-      - -X main.date={{.Date}}
+      - -X github.com/ptyhard/env-sync/cmd/env-sync.version={{.Version}}
+      - -X github.com/ptyhard/env-sync/cmd/env-sync.commit={{.Commit}}
+      - -X github.com/ptyhard/env-sync/cmd/env-sync.date={{.Date}}
 
 archives:
   - id: default

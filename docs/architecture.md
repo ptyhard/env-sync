@@ -23,16 +23,33 @@
 
 ```
 .
-├── main.go            # エントリポイント。run() のオーケストレーションと printUsage
-├── config.go          # options / definition / varConf / parseFlags、const apiBase
-├── entry.go           # 共通ドメインモデル Entry と resolveEntries（provider 非依存）
-├── provider.go        # Provider インターフェースと registry（自己登録の仕組み）
-├── vercel.go          # vercelProvider（Vercel REST API への同期）
-├── github.go          # githubProvider（GitHub Actions Secrets/Variables への同期）
-├── dotenv.go          # .env パーサ（parseDotenv）
-├── helpers.go         # fileExists / isTTY / sortedKeys 等の汎用ヘルパー
-├── init.go            # init サブコマンド（.env から env-sync.yaml 雛形生成）
-├── *_test.go          # 各ファイルに対応するテスト（同パッケージ）
+├── cmd/
+│   └── env-sync/
+│       ├── main.go        # package main のみ（エントリポイント・run() オーケストレーション・printUsage）
+│       └── main_test.go   # バイナリ統合テスト（--version / --dry-run 等）
+├── internal/
+│   ├── config/
+│   │   ├── config.go      # Options（provider.Options）・VarConf・Definition・ProviderVal・ParseFlags
+│   │   ├── dotenv.go      # ParseDotenv、trimExportPrefix
+│   │   ├── helpers.go     # FileExists、IsTTY、SortedKeys、SortedStrKeys
+│   │   ├── init.go        # BuildInitYAML、RunInit、ParseInitFlags、yamlKey、isSafeYAMLKey
+│   │   ├── config_test.go
+│   │   ├── dotenv_test.go
+│   │   ├── helpers_test.go
+│   │   └── init_test.go
+│   ├── sync/
+│   │   ├── entry.go       # ResolveEntries、deduplicateProviders、deduplicateEnvironments
+│   │   └── entry_test.go
+│   └── provider/
+│       ├── provider.go    # Entry・Options・Provider インターフェース・registry（RegisterProvider 等）
+│       ├── provider_test.go
+│       ├── vercel/
+│       │   ├── vercel.go  # vercelProvider + init()（const apiBase はここに定義）
+│       │   └── vercel_test.go
+│       └── github/
+│           ├── github.go  # githubProvider + init()
+│           ├── github_test.go
+│           └── github_integration_test.go
 ├── env-sync.yaml      # secret / environments の定義ファイル（値は書かない）
 ├── go.mod / go.sum
 ├── .goreleaser.yaml
@@ -41,20 +58,34 @@
     └── release.yml    # v* タグ push で GoReleaser
 ```
 
-**単一 `package main` のマルチファイル構成**。すべての型・関数は `package main` に属するが、責務ごとにファイルへ分割されている（タスク #9 / PR #10 のリファクタで `main.go` 集約から分割された）。
+**`cmd/+internal/` 構成**（golang-standards/project-layout 準拠）。`package main` は `cmd/env-sync/` のみ。ロジックは責務ごとに `internal/` 配下のパッケージへ分割されている。
+
+### 依存方向（循環参照禁止）
+
+```
+internal/provider          → 依存なし
+internal/config            → internal/provider
+internal/sync              → internal/provider, internal/config
+internal/provider/vercel   → internal/provider, internal/config
+internal/provider/github   → internal/provider, internal/config
+cmd/env-sync               → internal/provider, internal/config, internal/sync,
+                             _ internal/provider/vercel, _ internal/provider/github
+```
+
+`internal/provider` に `Entry` と `Options` を定義することで、`internal/config` → `internal/provider` の一方向依存を保ち循環参照を防いでいる。
 
 ## アーキテクチャ方針
 
-処理は `run()`（`main.go:59`）を起点とする手続き的パイプライン:
+処理は `run()`（`cmd/env-sync/main.go`）を起点とする手続き的パイプライン:
 
 ```
 run()
- ├─ init サブコマンドなら runInit() へ（init.go）
- ├─ parseFlags()             … CLI フラグ → options（config.go）
- ├─ env / 定義ファイル読込    … parseDotenv（dotenv.go）+ yaml.Unmarshal → definition
+ ├─ init サブコマンドなら config.RunInit() へ（internal/config/init.go）
+ ├─ config.ParseFlags()      … CLI フラグ → provider.Options（internal/config/config.go）
+ ├─ env / 定義ファイル読込    … config.ParseDotenv（internal/config/dotenv.go）+ yaml.Unmarshal → config.Definition
  ├─ 整合性チェック            … 定義と env の差分を警告（provider 共通）
- ├─ resolveEntries()         … definition + envVars → []Entry（共通ドメインモデルへ変換）
- └─ lookupProvider(opts.provider).Sync(opts, entries)
+ ├─ sync.ResolveEntries()    … config.Definition + envVars → []provider.Entry（共通ドメインモデルへ変換）
+ └─ provider.LookupProvider(pname).Sync(opts, entries)
 ```
 
 ### Provider 抽象（インターフェース + registry）
@@ -62,56 +93,58 @@ run()
 provider は `Provider` インターフェース（`provider.go`）で抽象化され、各実装は `init()` で自己登録する。`run()` は具象 provider を知らず、registry から引いて `Sync` を呼ぶだけ。
 
 ```go
-// provider.go — 同期先を抽象化するインターフェース
+// internal/provider/provider.go — 同期先を抽象化するインターフェース
 type Provider interface {
     Name() string
-    Sync(opts options, entries []Entry) error
+    Sync(opts Options, entries []Entry) error
 }
 
 // 名前 → ファクトリ関数の registry。各 provider の init() から登録する。
 var providerRegistry = map[string]func() Provider{}
 
-func registerProvider(name string, factory func() Provider) { ... }
-func lookupProvider(name string) (Provider, bool) { ... }
+func RegisterProvider(name string, factory func() Provider) { ... }
+func LookupProvider(name string) (Provider, bool) { ... }
 ```
 
 ```go
-// vercel.go — provider は自分のファイルの init() で自己登録する
+// internal/provider/vercel/vercel.go — provider は自分のパッケージの init() で自己登録する
 func init() {
-    registerProvider("vercel", func() Provider { return &vercelProvider{} })
+    provider.RegisterProvider("vercel", func() provider.Provider { return &vercelProvider{} })
 }
 ```
 
-**新しい同期先を追加する手順**: 新規ファイル（例 `cloudflare.go`）を作り、`Provider` を実装する struct と、`init()` での `registerProvider("名前", ...)` を書く。`run()` や `parseFlags` の分岐に手を入れる必要はない（`parseFlags` は registry に登録済みかで `--provider` を検証する）。
+**新しい同期先を追加する手順**: 新規パッケージ（例 `internal/provider/cloudflare/`）を作り、`provider.Provider` を実装する struct と、`init()` での `provider.RegisterProvider("名前", ...)` を書く。`cmd/env-sync/main.go` の blank import に追加するだけで `run()` や `ParseFlags` の分岐に手を入れる必要はない（`ParseFlags` は registry に登録済みかで `--provider` を検証する）。
 
 ### 共通ドメインモデル Entry
 
 provider 非依存の「登録する環境変数 1 件」は `Entry`（`entry.go`）で表現する。`resolveEntries` が定義 + env 値からこれを生成し、各 provider が自分の表現へ翻訳する。
 
 ```go
-// entry.go — provider 非依存の共通ドメインモデル
+// internal/provider/provider.go — provider 非依存の共通ドメインモデル
 type Entry struct {
     Key          string
     Value        string
     Secret       bool      // true=シークレット, false=平文
     Environments []string  // 登録先環境（空なら provider 側のデフォルト）
+    Providers    []string  // 同期先プロバイダーのリスト
 }
 ```
 
 provider 側での翻訳:
 
-- **Vercel**（`entriesToVercelItems`, `vercel.go:154`）: `Secret` → `type`（true=`sensitive` / false=`plain`）、`Environments` → `target`（空なら `[production, preview]`）。`production|preview|development` のみ許可。
-- **GitHub**（`expandGitHubTasks`, `github.go:43`）: `Secret` → Secret(sealed box 暗号化) / Variable(平文) の振り分け、`Environments` → named environment スコープ（空なら repo レベル。各環境ごとに task を展開）。
+- **Vercel**（`entriesToVercelItems`, `internal/provider/vercel/vercel.go`）: `Secret` → `type`（true=`sensitive` / false=`plain`）、`Environments` → `target`（空なら `[production, preview]`）。`production|preview|development` のみ許可。
+- **GitHub**（`expandGitHubTasks`, `internal/provider/github/github.go`）: `Secret` → Secret(sealed box 暗号化) / Variable(平文) の振り分け、`Environments` → named environment スコープ（空なら repo レベル。各環境ごとに task を展開）。
 
 ## 設定ファイル（env-sync.yaml）の構造
 
-定義は `definition` 構造体（`config.go:27`）にマッピングされる。**値は書かず、`secret` / `environments` の宣言のみ**。
+定義は `config.Definition` 構造体（`internal/config/config.go`）にマッピングされる。**値は書かず、`secret` / `environments` の宣言のみ**。
 
 ```go
-// config.go
-type varConf struct {
-    Secret       *bool    `yaml:"secret"`       // nil=未指定（defaults にフォールバック）
-    Environments []string `yaml:"environments"`
+// internal/config/config.go
+type VarConf struct {
+    Secret       *bool        `yaml:"secret"`       // nil=未指定（defaults にフォールバック）
+    Environments []string     `yaml:"environments"`
+    Provider     *ProviderVal `yaml:"provider"`
 }
 ```
 
@@ -124,14 +157,14 @@ type varConf struct {
 
 ## エラーハンドリング
 
-- 致命的エラーは `die(format, ...)`（`fmt.Errorf` のラッパー、`main.go:55`）で `error` を返し、`main()` が `os.Stderr` に `エラー: %s` を出して `os.Exit(1)`。
+- 致命的エラーは `die(format, ...)`（`fmt.Errorf` のラッパー、`cmd/env-sync/main.go`）で `error` を返し、`main()` が `os.Stderr` に `エラー: %s` を出して `os.Exit(1)`。`internal/` のコードでは `die()` を使わず `fmt.Errorf()` を直接使用する。
 - 個別変数の送信失敗は各 provider の `Sync` 内で集計し、`✓` / `✗` を逐次表示、最後に「成功 N / 失敗 N」を出して失敗があれば `os.Exit(1)`。
-- API のエラーボディは `parseErrorBody`（Vercel, `vercel.go`）/ `parseGitHubErrorBody`（`github.go`）で要約してメッセージに付与する。
-- フラグのパースエラーは `parseFlags` 内で直接 `os.Stderr` + `os.Exit(1)`（`error` を返さず即終了）。
+- API のエラーボディは `parseErrorBody`（Vercel, `internal/provider/vercel/vercel.go`）/ `parseGitHubErrorBody`（`internal/provider/github/github.go`）で要約してメッセージに付与する。
+- フラグのパースエラーは `config.ParseFlags` 内で直接 `os.Stderr` + `os.Exit(1)`（`error` を返さず即終了）。
 
 ## CLI フラグ
 
-`parseFlags`（`config.go:37`）で手書きパース。`--flag value` と `--flag=value` の両形式、一部は `-flag` 短縮も受ける。
+`config.ParseFlags`（`internal/config/config.go`）で手書きパース。`--flag value` と `--flag=value` の両形式、一部は `-flag` 短縮も受ける。
 
 | フラグ | 既定 | 説明 |
 |--------|------|------|
@@ -154,14 +187,16 @@ type varConf struct {
 | `GITHUB_TOKEN` | GitHub | アクセストークン（dry-run 時は不要） |
 | `GITHUB_REPO` | GitHub | `owner/repo`。未指定なら `git remote origin` から自動解決 |
 
-トークン等の秘匿値はすべて `os.Getenv` で取得し、コードやログには出さない。GitHub Secrets は送信前に NaCl box で sealed box 暗号化する（`encryptSecret`, `github.go:257`）。
+トークン等の秘匿値はすべて `os.Getenv` で取得し、コードやログには出さない。GitHub Secrets は送信前に NaCl box で sealed box 暗号化する（`encryptSecret`, `internal/provider/github/github.go`）。
 
 ## テスト・CI
 
-- **配置**: 実装と同階層・同パッケージ（`*_test.go`、`package main`）。ファイルごとに対応するテスト（`config_test.go` / `entry_test.go` / `provider_test.go` / `vercel_test.go` / `github_test.go` / `github_integration_test.go` 等）。
+- **配置**: 実装パッケージと同ディレクトリ（`*_test.go`）。ファイルごとに対応するテスト（`internal/config/config_test.go` / `internal/sync/entry_test.go` / `internal/provider/provider_test.go` / `internal/provider/vercel/vercel_test.go` / `internal/provider/github/github_test.go` / `github_integration_test.go` 等）。
+  - `internal/config` のテスト（`config_test.go`, `init_test.go`）は blank import（`_ "internal/provider/vercel"` 等）による循環参照を避けるため `package config_test` 形式（ブラックボックステスト）を採用。
+  - `internal/provider` のテスト（`provider_test.go`）も `package provider_test` 形式（vercel/github パッケージの blank import が必要なため）。
 - **実行**: `go test ./...`（CI は `-race` 付き）。静的解析 `go vet ./...`、フォーマット `gofmt`。
 - **CI**（`.github/workflows/ci.yml`）: `push`（main）と `pull_request` で **gofmt チェック → `go vet ./...` → `go build ./...` → `go test -race ./...`** を実行。
-- API 統合テストは `httptest.NewServer` を立て、`githubAPIBase` を `t.Cleanup` で差し替えるパターン（`withGitHubAPIBase`）。
+- API 統合テストは `httptest.NewServer` を立て、`githubAPIBase` を `t.Cleanup` で差し替えるパターン（`withGitHubAPIBase`、`internal/provider/github/github_integration_test.go`）。
 - 詳細は `docs/test-architecture.md`。
 
 ## コーディング規約
@@ -178,6 +213,6 @@ type varConf struct {
 - `--dry-run` でも値は一切出力しない。
 - 配布は Homebrew **Cask**（GoReleaser v2.16 以降 formula 廃止のため）。tap への push には自リポジトリ外書き込み用の `HOMEBREW_TAP_TOKEN`（Fine-grained PAT）が必要。
 
-### 今後の方向（任意）
+### パッケージ分割の設計判断
 
-現状は単一 `package main` のままファイル分割している。さらに境界を強くするなら、[golang-standards/project-layout](https://github.com/golang-standards/project-layout) を参考に `cmd/env-sync`（`package main` はここだけ）+ `internal/{config,sync,provider/...}` への分割も選択肢（小規模 CLI のため必須ではない。`pkg/` は公開予定が無いので作らない）。採用する場合はロジックを `package main` に残さず役割名パッケージへ移し、`go install` ターゲットが `cmd/env-sync` に移る点と README/リリース手順の更新に注意する。
+[golang-standards/project-layout](https://github.com/golang-standards/project-layout) 準拠の `cmd/env-sync` + `internal/` 構成に移行済み。`pkg/` は外部公開予定が無いため作らない。`go install` ターゲットは `github.com/ptyhard/env-sync/cmd/env-sync@latest`。

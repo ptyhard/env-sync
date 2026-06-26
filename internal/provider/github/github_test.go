@@ -1,4 +1,4 @@
-package main
+package github
 
 import (
 	"crypto/rand"
@@ -7,6 +7,9 @@ import (
 
 	"golang.org/x/crypto/nacl/box"
 	"gopkg.in/yaml.v3"
+
+	"github.com/ptyhard/env-sync/internal/config"
+	"github.com/ptyhard/env-sync/internal/provider"
 )
 
 // --- resolveGitHubRepo の GITHUB_REPO パーステスト ---
@@ -218,7 +221,7 @@ variables:
     secret: false
     environments: [development]
 `
-	var def definition
+	var def config.Definition
 	if err := yaml.Unmarshal([]byte(yamlText), &def); err != nil {
 		t.Fatalf("YAML パース失敗: %v", err)
 	}
@@ -243,7 +246,7 @@ variables:
 // --- expandGitHubTasks のテスト ---
 
 func TestExpandGitHubTasks_EmptyEnvironments_RepoLevel(t *testing.T) {
-	entries := []Entry{
+	entries := []provider.Entry{
 		{Key: "FOO", Value: "bar", Secret: true, Environments: nil},
 	}
 	tasks := expandGitHubTasks(entries)
@@ -259,7 +262,7 @@ func TestExpandGitHubTasks_EmptyEnvironments_RepoLevel(t *testing.T) {
 }
 
 func TestExpandGitHubTasks_MultipleEnvironments(t *testing.T) {
-	entries := []Entry{
+	entries := []provider.Entry{
 		{Key: "FOO", Value: "bar", Secret: false, Environments: []string{"production", "staging"}},
 	}
 	tasks := expandGitHubTasks(entries)
@@ -275,7 +278,7 @@ func TestExpandGitHubTasks_MultipleEnvironments(t *testing.T) {
 }
 
 func TestExpandGitHubTasks_MixedEntries(t *testing.T) {
-	entries := []Entry{
+	entries := []provider.Entry{
 		{Key: "REPO_SECRET", Value: "s1", Secret: true, Environments: nil},
 		{Key: "ENV_VAR", Value: "v1", Secret: false, Environments: []string{"production", "preview"}},
 	}

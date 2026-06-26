@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"fmt"
@@ -6,16 +6,16 @@ import (
 	"strings"
 )
 
-// initOptions は init サブコマンドのフラグ値を保持する。
-type initOptions struct {
-	env   string
-	def   string
-	force bool
+// InitOptions は init サブコマンドのフラグ値を保持する。
+type InitOptions struct {
+	Env   string
+	Def   string
+	Force bool
 }
 
-// parseInitFlags は init サブコマンドのコマンドライン引数を解析する。
-func parseInitFlags(argv []string) initOptions {
-	opts := initOptions{env: ".env", def: "env-sync.yaml"}
+// ParseInitFlags は init サブコマンドのコマンドライン引数を解析する。
+func ParseInitFlags(argv []string, printUsageFn func()) InitOptions {
+	opts := InitOptions{Env: ".env", Def: "env-sync.yaml"}
 	for i := 0; i < len(argv); i++ {
 		arg := argv[i]
 		next := func() string {
@@ -36,30 +36,34 @@ func parseInitFlags(argv []string) initOptions {
 		}
 		switch {
 		case arg == "--env" || arg == "-env":
-			opts.env = requireValue("--env", next())
+			opts.Env = requireValue("--env", next())
 		case strings.HasPrefix(arg, "--env="):
-			opts.env = requireValue("--env", strings.TrimPrefix(arg, "--env="))
+			opts.Env = requireValue("--env", strings.TrimPrefix(arg, "--env="))
 		case arg == "--def" || arg == "-def":
-			opts.def = requireValue("--def", next())
+			opts.Def = requireValue("--def", next())
 		case strings.HasPrefix(arg, "--def="):
-			opts.def = requireValue("--def", strings.TrimPrefix(arg, "--def="))
+			opts.Def = requireValue("--def", strings.TrimPrefix(arg, "--def="))
 		case arg == "--force" || arg == "-force":
-			opts.force = true
+			opts.Force = true
 		case arg == "-h" || arg == "--help":
-			printUsage()
+			if printUsageFn != nil {
+				printUsageFn()
+			}
 			os.Exit(0)
 		default:
 			fmt.Fprintf(os.Stderr, "エラー: 不明な引数: %s\n", arg)
-			printUsage()
+			if printUsageFn != nil {
+				printUsageFn()
+			}
 			os.Exit(1)
 		}
 	}
 	return opts
 }
 
-// buildInitYAML は keys から env-sync.yaml の雛形テキストを生成する。
+// BuildInitYAML は keys から env-sync.yaml の雛形テキストを生成する。
 // 値は一切含まない。yaml.Marshal は使わず手組みテキスト生成でコメントを差し込む。
-func buildInitYAML(keys []string) string {
+func BuildInitYAML(keys []string) string {
 	var sb strings.Builder
 
 	sb.WriteString("# Vercel / GitHub Actions に登録する環境変数の定義。\n")
@@ -139,45 +143,45 @@ func isSafeYAMLKey(key string) bool {
 	return true
 }
 
-// runInit は init サブコマンドのメイン処理。
-func runInit(argv []string) error {
-	opts := parseInitFlags(argv)
+// RunInit は init サブコマンドのメイン処理。
+func RunInit(argv []string, printUsageFn func()) error {
+	opts := ParseInitFlags(argv, printUsageFn)
 
-	// os.ReadFile のエラーで分岐する。fileExists での事前チェックは
+	// os.ReadFile のエラーで分岐する。FileExists での事前チェックは
 	// 権限エラー等を「見つかりません」と誤判定し得るため使わない。
-	envText, err := os.ReadFile(opts.env)
+	envText, err := os.ReadFile(opts.Env)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return die("env ファイルが見つかりません: %s", opts.env)
+			return fmt.Errorf("env ファイルが見つかりません: %s", opts.Env)
 		}
-		return die("env ファイルの読み込みに失敗: %s: %s", opts.env, err)
+		return fmt.Errorf("env ファイルの読み込みに失敗: %s: %s", opts.Env, err)
 	}
-	envVars := parseDotenv(string(envText))
-	keys := sortedStrKeys(envVars)
+	envVars := ParseDotenv(string(envText))
+	keys := SortedStrKeys(envVars)
 
-	text := buildInitYAML(keys)
+	text := BuildInitYAML(keys)
 
 	// 上書き保護は O_CREATE|O_EXCL でアトミックに行う。
 	flags := os.O_WRONLY | os.O_CREATE | os.O_TRUNC
-	if !opts.force {
+	if !opts.Force {
 		flags = os.O_WRONLY | os.O_CREATE | os.O_EXCL
 	}
-	f, err := os.OpenFile(opts.def, flags, 0o644)
+	f, err := os.OpenFile(opts.Def, flags, 0o644)
 	if err != nil {
-		if !opts.force && os.IsExist(err) {
-			return die("既に存在します: %s（上書きするには --force）", opts.def)
+		if !opts.Force && os.IsExist(err) {
+			return fmt.Errorf("既に存在します: %s（上書きするには --force）", opts.Def)
 		}
-		return die("定義ファイルの書き込みに失敗: %s: %s", opts.def, err)
+		return fmt.Errorf("定義ファイルの書き込みに失敗: %s: %s", opts.Def, err)
 	}
 	if _, err := f.WriteString(text); err != nil {
 		f.Close()
-		return die("定義ファイルの書き込みに失敗: %s: %s", opts.def, err)
+		return fmt.Errorf("定義ファイルの書き込みに失敗: %s: %s", opts.Def, err)
 	}
 	if err := f.Close(); err != nil {
-		return die("定義ファイルの書き込みに失敗: %s: %s", opts.def, err)
+		return fmt.Errorf("定義ファイルの書き込みに失敗: %s: %s", opts.Def, err)
 	}
 
-	fmt.Printf("生成しました: %s\n", opts.def)
+	fmt.Printf("生成しました: %s\n", opts.Def)
 	fmt.Printf("キー数: %d\n", len(keys))
 	if len(keys) > 0 {
 		fmt.Printf("キー一覧:\n")
