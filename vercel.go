@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -27,18 +28,20 @@ func (v *vercelProvider) Sync(opts options, entries []Entry) error {
 	token := os.Getenv("VERCEL_TOKEN")
 	projectID := os.Getenv("VERCEL_PROJECT_ID")
 	teamID := os.Getenv("VERCEL_TEAM_ID")
-	if projectID == "" && fileExists(".vercel/project.json") {
+	if projectID == "" {
 		pjText, err := os.ReadFile(".vercel/project.json")
-		if err != nil {
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return die(".vercel/project.json の読み込みに失敗: %s", err)
 		}
-		var pj projectJSON
-		if err := json.Unmarshal(pjText, &pj); err != nil {
-			return die(".vercel/project.json の JSON パースに失敗: %s", err)
-		}
-		projectID = pj.ProjectID
-		if teamID == "" {
-			teamID = pj.OrgID
+		if err == nil {
+			var pj projectJSON
+			if err := json.Unmarshal(pjText, &pj); err != nil {
+				return die(".vercel/project.json の JSON パースに失敗: %s", err)
+			}
+			projectID = pj.ProjectID
+			if teamID == "" {
+				teamID = pj.OrgID
+			}
 		}
 	}
 	if !opts.dryRun && token == "" {
@@ -122,6 +125,7 @@ func (v *vercelProvider) Sync(opts options, entries []Entry) error {
 		if res.StatusCode >= 200 && res.StatusCode < 300 {
 			fmt.Printf("✓ %s (%s)\n", it.Key, it.Type)
 			ok++
+			io.Copy(io.Discard, res.Body) //nolint:errcheck // drain で接続を再利用可能にする
 		} else {
 			msg := fmt.Sprintf("HTTP %d", res.StatusCode)
 			if detail := parseErrorBody(res.Body); detail != "" {

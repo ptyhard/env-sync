@@ -1,5 +1,7 @@
 package main
 
+import "strings"
+
 // Entry は provider 非依存の共通ドメインモデル。
 // 登録する環境変数 1 件分の情報を保持する。
 type Entry struct {
@@ -54,7 +56,7 @@ func resolveEntries(def definition, envVars map[string]string, defKeys []string)
 	return entries, nil
 }
 
-// deduplicateEnvironments は environments スライスから空文字を除去し重複を排除する。
+// deduplicateEnvironments は environments スライスから空文字・空白のみの要素を除去し重複を排除する。
 // 入力が空なら nil を返す（provider 側フォールバックが空スライスかどうかを len で判定するため）。
 func deduplicateEnvironments(envs []string) []string {
 	if len(envs) == 0 {
@@ -63,11 +65,12 @@ func deduplicateEnvironments(envs []string) []string {
 	seen := make(map[string]bool, len(envs))
 	result := make([]string, 0, len(envs))
 	for _, e := range envs {
-		if e == "" || seen[e] {
+		trimmed := strings.TrimSpace(e)
+		if trimmed == "" || seen[trimmed] {
 			continue
 		}
-		seen[e] = true
-		result = append(result, e)
+		seen[trimmed] = true
+		result = append(result, trimmed)
 	}
 	if len(result) == 0 {
 		return nil
