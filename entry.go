@@ -58,14 +58,24 @@ func resolveEntries(def definition, envVars map[string]string, defKeys []string,
 		// provider の解決: varConf.Provider → defaults.Provider → CLI フラグ
 		var providers []string
 		if def.Defaults.Provider != nil {
+			if len(def.Defaults.Provider.Values) == 0 {
+				names := strings.Join(registeredProviderNames(), " / ")
+				return nil, fmt.Errorf("defaults.provider に空配列が指定されています（%s のいずれかを指定してください）", names)
+			}
 			providers = def.Defaults.Provider.Values
 		}
 		if conf.Provider != nil {
+			if len(conf.Provider.Values) == 0 {
+				names := strings.Join(registeredProviderNames(), " / ")
+				return nil, fmt.Errorf("%s: provider に空配列が指定されています（%s のいずれかを指定してください）", key, names)
+			}
 			providers = conf.Provider.Values
 		}
 		if len(providers) == 0 {
 			providers = []string{cliProvider}
 		}
+		// [vercel, vercel] のような重複指定で二重 Sync にならないよう排除する
+		providers = deduplicateProviders(providers)
 
 		// provider 値の検証
 		for _, p := range providers {
@@ -84,6 +94,25 @@ func resolveEntries(def definition, envVars map[string]string, defKeys []string,
 		})
 	}
 	return entries, nil
+}
+
+// deduplicateProviders は providers スライスから空文字・空白のみの要素を除去し重複を排除する。
+// [vercel, vercel] のような重複指定を正規化し、二重 Sync を防ぐ。
+func deduplicateProviders(providers []string) []string {
+	if len(providers) == 0 {
+		return providers
+	}
+	seen := make(map[string]bool, len(providers))
+	result := make([]string, 0, len(providers))
+	for _, p := range providers {
+		trimmed := strings.TrimSpace(p)
+		if trimmed == "" || seen[trimmed] {
+			continue
+		}
+		seen[trimmed] = true
+		result = append(result, trimmed)
+	}
+	return result
 }
 
 // deduplicateEnvironments は environments スライスから空文字・空白のみの要素を除去し重複を排除する。

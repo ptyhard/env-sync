@@ -291,3 +291,50 @@ func TestResolveEntries_ProviderFallbackToCLI(t *testing.T) {
 		t.Errorf("Providers = %v, want [github]", entries[0].Providers)
 	}
 }
+
+// provider に重複値を指定すると重複排除され二重 Sync にならない
+func TestResolveEntries_ProviderDuplicateDeduplication(t *testing.T) {
+	pv := &ProviderVal{Values: []string{"vercel", "vercel"}}
+	def := definition{
+		Variables: map[string]varConf{
+			"FOO": {Provider: pv},
+		},
+	}
+	envVars := map[string]string{"FOO": "bar"}
+	entries, err := resolveEntries(def, envVars, []string{"FOO"}, "vercel")
+	if err != nil {
+		t.Fatalf("resolveEntries エラー: %v", err)
+	}
+	if len(entries[0].Providers) != 1 || entries[0].Providers[0] != "vercel" {
+		t.Errorf("Providers = %v, want [vercel]（重複排除後）", entries[0].Providers)
+	}
+}
+
+// varConf の provider に空配列を明示するとエラーを返す
+func TestResolveEntries_ProviderExplicitEmptyArrayError(t *testing.T) {
+	pv := &ProviderVal{Values: []string{}}
+	def := definition{
+		Variables: map[string]varConf{
+			"FOO": {Provider: pv},
+		},
+	}
+	envVars := map[string]string{"FOO": "bar"}
+	_, err := resolveEntries(def, envVars, []string{"FOO"}, "vercel")
+	if err == nil {
+		t.Error("空配列の provider 指定でエラーが返らなかった")
+	}
+}
+
+// defaults.provider に空配列を明示するとエラーを返す
+func TestResolveEntries_ProviderDefaultsExplicitEmptyArrayError(t *testing.T) {
+	def := definition{}
+	def.Defaults.Provider = &ProviderVal{Values: []string{}}
+	def.Variables = map[string]varConf{
+		"FOO": {},
+	}
+	envVars := map[string]string{"FOO": "bar"}
+	_, err := resolveEntries(def, envVars, []string{"FOO"}, "vercel")
+	if err == nil {
+		t.Error("defaults.provider に空配列を指定した場合にエラーが返らなかった")
+	}
+}

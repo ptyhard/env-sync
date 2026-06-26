@@ -27,7 +27,7 @@
 //	--provider <name>         同期先（デフォルト vercel）
 //	--env  <file>             値を読む env ファイル（デフォルト .env）
 //	--def  <file>             定義 YAML（デフォルト env-sync.yaml）
-//	--dry-run                 実際には送信せず、登録予定の key/secret/environments だけ表示（値は出さない）
+//	--dry-run                 実際には送信せず、登録予定の key/secret/environments/providers だけ表示（値は出さない）
 //	--yes, -y                 送信前の確認をスキップ
 package main
 
@@ -126,7 +126,16 @@ func run() error {
 		} else {
 			fmt.Printf("同期対象 %d 件:\n", len(entries))
 			for _, e := range entries {
-				fmt.Printf("  %s -> %s\n", e.Key, strings.Join(e.Providers, ", "))
+				secretStr := "secret=true"
+				if !e.Secret {
+					secretStr = "secret=false"
+				}
+				envsStr := strings.Join(e.Environments, ", ")
+				if envsStr == "" {
+					envsStr = "(デフォルト)"
+				}
+				fmt.Printf("  %-30s  %s  environments=[%s]  providers=[%s]\n",
+					e.Key, secretStr, envsStr, strings.Join(e.Providers, ", "))
 			}
 		}
 		fmt.Println("\n[dry-run] 送信しません")
@@ -162,7 +171,7 @@ func printUsage() {
   --provider <name>         同期先（デフォルト vercel）
   --env <file>              値を読む env ファイル（デフォルト .env）
   --def <file>              定義 YAML（デフォルト env-sync.yaml）
-  --dry-run                 送信せず登録予定の key/secret/environments だけ表示
+  --dry-run                 送信せず登録予定の key/secret/environments/providers を表示
   --yes, -y                 送信前の確認をスキップ
   --version                 バージョン情報を表示して終了
   -h, --help                このヘルプを表示
