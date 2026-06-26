@@ -4,11 +4,9 @@
 Vercel モードでは Vercel REST API (`POST /v10/projects/{id}/env?upsert=true`) を使うため、再実行すると既存の変数は **更新（upsert）** される。
 GitHub Actions モードでは Secrets（sealed box 暗号化）と Variables（平文）の両方に対応する。
 
-arg-next の env 同期スクリプトと同じ仕様を Go で実装したもの。
-
 ## 仕組み
 
-- **type / target は `env-sync.yaml` で明示的に宣言**する（キー名のヒューリスティックに頼らない）。
+- **secret / environments は `env-sync.yaml` で明示的に宣言**する（キー名のヒューリスティックに頼らない）。
 - **値は `env-sync.yaml` には書かない**（git にコミットされるため）。値は `.env(.production)` から取得する。
 - 定義に無いキーは登録されない（`.env` にあっても警告のうえスキップ）。
 - 定義にあるが `.env` に値が無いキーも警告のうえスキップ。
@@ -62,20 +60,40 @@ cask を別リポジトリ `ptyhard/homebrew-tap` へ push するため、`GITHU
 
 ```yaml
 defaults:
-  target: [production, preview]
-  type: sensitive
+  secret: true
+
 variables:
-  NEXT_PUBLIC_FIREBASE_API_KEY: { type: encrypted }
-  DATABASE_URL: { type: sensitive, target: [production] }
+  NEXT_PUBLIC_FIREBASE_API_KEY: { secret: false }
+  DATABASE_URL: { secret: true, environments: [production] }
+  API_SECRET: { secret: true }
 ```
 
-| type | Vercel UI | 説明 |
-|------|-----------|------|
-| `encrypted` | Variables | ダッシュボードで値を再表示できる通常の変数 |
-| `sensitive` | Sensitive | 保存後は値を読めないシークレット向け |
-| `plain` | Plain | 暗号化なしの平文 |
+### スキーマ
 
-`target` は `production` / `preview` / `development` の配列。各変数で省略すると `defaults` が使われる。
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `secret` | `bool` | `true`（デフォルト）: シークレット登録 / `false`: 平文登録 |
+| `environments` | `[]string` | 登録先環境の配列。省略すると `defaults.environments` を継承 |
+
+#### Vercel における各フィールドの意味
+
+| `secret` | Vercel type | 説明 |
+|---|---|---|
+| `true` | `sensitive` | 保存後は値を読めないシークレット向け |
+| `false` | `plain` | 暗号化なしの平文 |
+
+`environments` には `production` / `preview` / `development` を指定。省略時（空）は `production` と `preview` をデフォルト適用。
+
+#### GitHub Actions における各フィールドの意味
+
+| `secret` | 登録先 | 説明 |
+|---|---|---|
+| `true` | GitHub Actions Secrets | sealed box 暗号化。登録後は値を閲覧不可 |
+| `false` | GitHub Actions Variables | 平文。値は GitHub UI で確認可能 |
+
+`environments` に named environment 名を指定すると、その Environment スコープに登録。省略時（空）はリポジトリレベルに登録。
+
+> **注意**: GitHub の named environment は事前に作成が必要です。存在しない environment 名を指定するとエラーになります。
 
 ## 事前準備
 
@@ -105,15 +123,15 @@ vercel link
 ./env-sync init --env .env.production --force
 ```
 
-- `NEXT_PUBLIC_` プレフィックスのキーは `encrypted`、それ以外は `sensitive` を初期値として設定します
-- これはあくまで**雛形**です。type は投入前に必ず見直してください
+- `NEXT_PUBLIC_` プレフィックスのキーは `secret: false`、それ以外は `secret: true` を初期値として設定します
+- これはあくまで**雛形**です。secret は投入前に必ず見直してください
 - **値は一切書き込まれません**（`.env` の値が yaml に混入することはありません）
 - 既存の `env-sync.yaml` がある場合、`--force` なしでは上書きを拒否してエラーで終了します
 
 ## 使い方
 
 ```bash
-# dry-run（送信せず key / type / target だけ確認。値は表示されない）
+# dry-run（送信せず key / secret / environments だけ確認。値は表示されない）
 VERCEL_PROJECT_ID=dummy ./env-sync --env .env.production --dry-run
 
 # 本番投入（登録対象を一覧表示し、y/N の確認のうえ送信する）
@@ -123,7 +141,7 @@ VERCEL_TOKEN=xxxxx ./env-sync --env .env.production
 VERCEL_TOKEN=xxxxx ./env-sync --env .env.production --yes
 ```
 
-送信前に登録対象（key / type / target）を一覧表示し、既存変数は upsert で上書きされるため `y/N` の確認を取る。`--yes`（`-y`）で確認をスキップできる。非対話環境で `--yes` を付けないと安全のため中止する。
+送信前に登録対象（key / secret / target）を一覧表示し、既存変数は upsert で上書きされるため `y/N` の確認を取る。`--yes`（`-y`）で確認をスキップできる。非対話環境で `--yes` を付けないと安全のため中止する。
 
 ## オプション / 環境変数
 
@@ -131,10 +149,9 @@ VERCEL_TOKEN=xxxxx ./env-sync --env .env.production --yes
 |------|------|------|
 | `--provider vercel\|github` | – | 同期先（デフォルト `vercel`） |
 | `--env <file>` | – | 値を読む env ファイル（デフォルト `.env`） |
-| `--def <file>` | – | type/target 定義 YAML（デフォルト `env-sync.yaml`） |
+| `--def <file>` | – | 定義 YAML（デフォルト `env-sync.yaml`） |
 | `--dry-run` | – | 送信せず登録予定のみ表示 |
 | `--yes` / `-y` | – | 送信前の確認をスキップ |
-| `--github-env <name>` | – | GitHub Actions の Environment スコープ（未指定はリポジトリレベル） |
 | `--force` | – | `init` 時に既存の def ファイルを上書きする |
 | `VERCEL_TOKEN` | ◯(Vercel) | Vercel アクセストークン（dry-run 時は不要） |
 | `VERCEL_PROJECT_ID` | △(Vercel) | プロジェクト ID。未指定なら `.vercel/project.json` から自動取得 |
@@ -142,46 +159,51 @@ VERCEL_TOKEN=xxxxx ./env-sync --env .env.production --yes
 | `GITHUB_TOKEN` | ◯(GitHub) | GitHub アクセストークン（dry-run 時は不要） |
 | `GITHUB_REPO` | –(GitHub) | `owner/repo` 形式。未指定なら `git remote origin` から自動取得 |
 
+> **移行案内**: `--github-env <name>` フラグは廃止されました。GitHub の named environment への登録は `env-sync.yaml` の `environments` フィールドで指定してください。
+
 ## GitHub Actions モード
 
 `--provider github` を指定すると GitHub Actions の Secrets/Variables に同期します。
 
 ```bash
-# dry-run（送信せず key / kind だけ確認。値は表示されない）
+# dry-run（送信せず key / secret / environments だけ確認。値は表示されない）
 GITHUB_REPO=owner/repo ./env-sync --provider github --env .env.production --dry-run
 
 # 本番投入（リポジトリレベル）
 GITHUB_TOKEN=xxxxx GITHUB_REPO=owner/repo ./env-sync --provider github --env .env.production
 
-# Environment スコープに登録
-GITHUB_TOKEN=xxxxx ./env-sync --provider github --github-env production --env .env.production
+# named environment に登録（env-sync.yaml の environments フィールドで指定）
+# environments: [production] を yaml に書けばその environment に登録される
+GITHUB_TOKEN=xxxxx ./env-sync --provider github --env .env.production
 
 # 確認をスキップ（CI など）
 GITHUB_TOKEN=xxxxx ./env-sync --provider github --yes --env .env.production
 ```
 
-### `kind` フィールド
-
-`env-sync.yaml` の各変数に `kind` を追加することで登録先を制御します。
+### `env-sync.yaml` での GitHub 向け設定例
 
 ```yaml
 defaults:
-  kind: secret   # 未指定時のデフォルト（安全側）
+  secret: true
 
 variables:
   DATABASE_URL:
-    kind: secret    # GitHub Actions Secrets として登録（sealed box 暗号化）
+    secret: true                      # repo レベルの Secret
   PUBLIC_FLAG:
-    kind: variable  # GitHub Actions Variables として登録（平文）
+    secret: false                     # repo レベルの Variable
+  API_KEY_PROD:
+    secret: true
+    environments: [production]        # production environment の Secret
+  FEATURE_FLAG:
+    secret: false
+    environments: [production, staging]  # production, staging の Variable
 ```
 
-| kind | 登録先 | 暗号化 | 説明 |
-|------|--------|--------|------|
-| `secret` | GitHub Actions Secrets | sealed box (NaCl) | 登録後は値を閲覧不可 |
-| `variable` | GitHub Actions Variables | なし（平文） | 値は GitHub UI で確認可能 |
+> **注意**: `environments` に指定した named environment は GitHub 上で事前に作成が必要です。存在しない environment 名を指定するとエラーになります。
 
 ### セキュリティ
 
-- 秘密値（`kind: secret`）は **GitHub の公開鍵で sealed box 暗号化**してから PUT します。平文は送信しません。
+- `secret: true` の変数は **GitHub の公開鍵で sealed box 暗号化**してから PUT します。平文は送信しません。
 - 登録対象の一覧表示・確認プロンプト・成否ログのいずれにも **値は出力されません**。`--dry-run` でも同様。
 - 公開鍵の長さ（32 バイト）を検証し、不正な鍵では処理を中止します。
+- 公開鍵キャッシュは envScope（environment）ごとに管理します（スコープで鍵が異なるため）。
