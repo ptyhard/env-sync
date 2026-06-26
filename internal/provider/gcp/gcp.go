@@ -2,6 +2,7 @@
 package gcp
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
+	"github.com/ptyhard/env-sync/internal/config"
 	"github.com/ptyhard/env-sync/internal/provider"
 )
 
@@ -103,6 +105,21 @@ func (g *gcpProvider) Sync(opts provider.Options, entries []provider.Entry) erro
 	if opts.DryRun {
 		fmt.Println("[dry-run] 送信しません")
 		return nil
+	}
+
+	// ---- 確認プロンプト ----
+	if !opts.Yes {
+		if !config.IsTTY(os.Stdin) {
+			return fmt.Errorf("対話できない環境です。確認をスキップするには --yes を付けてください")
+		}
+		fmt.Print("上記を GCP Secret Manager に登録します（既存は上書き）。続行しますか? (y/N) ")
+		reader := bufio.NewReader(os.Stdin)
+		line, _ := reader.ReadString('\n')
+		ans := strings.ToLower(strings.TrimSpace(line))
+		if ans != "y" && ans != "yes" {
+			fmt.Println("中止しました")
+			return nil
+		}
 	}
 
 	ctx := context.Background()

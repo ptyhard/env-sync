@@ -17,12 +17,13 @@
 #           GitHub: named environment 名（空なら repo レベル）
 #           ※ GitHub の named environment は事前に作成が必要
 #
-#   provider: vercel|github|gcp|[vercel, gcp]
+#   provider: vercel|github|gcp|[vercel, gcp]|[vercel, github]
 #           同期先プロバイダーを変数ごとに指定する。
-#           - provider: vercel          Vercel にのみ送る
-#           - provider: github          GitHub Actions にのみ送る
-#           - provider: gcp             GCP Secret Manager にのみ送る
-#           - provider: [vercel, gcp]   Vercel と GCP 両方に送る
+#           - provider: vercel             Vercel にのみ送る
+#           - provider: github             GitHub Actions にのみ送る
+#           - provider: gcp               GCP Secret Manager にのみ送る
+#           - provider: [vercel, gcp]      Vercel と GCP 両方に送る
+#           - provider: [vercel, github]   Vercel と GitHub 両方に送る
 #           解決優先順位: 変数個別 > defaults > CLI --provider フラグ（デフォルト vercel）
 #           ※ 未指定なら defaults.provider → --provider フラグのデフォルト（vercel）が使われる
 #
@@ -31,6 +32,7 @@
 #           認証: Application Default Credentials（GOOGLE_APPLICATION_CREDENTIALS または ADC 自動解決）
 #           secret: true のエントリのみ同期（false はスキップ）
 #           environments に値を設定すると、Secret に labels {"environment": "<env>"} が付与される
+#           ※ environments が複数の場合は "-" で連結（例: [production, staging] → "production-staging"）
 
 defaults:
   secret: true

@@ -22,6 +22,11 @@
 //	GITHUB_TOKEN        GitHub のアクセストークン（dry-run 時は不要）
 //	GITHUB_REPO         owner/repo 形式。未指定なら git remote から取得
 //
+// 必須 (GCP):
+//
+//	GCP_PROJECT_ID      Secret Manager の対象 GCP プロジェクト ID
+//	認証: Application Default Credentials（ADC）を使用。gcloud auth application-default login 等で設定する。
+//
 // オプション:
 //
 //	--provider <name>         同期先（デフォルト vercel）
@@ -207,6 +212,12 @@ func printUsage() {
 環境変数（GitHub）:
   GITHUB_TOKEN  GitHub のアクセストークン（必須、dry-run 時は不要）
   GITHUB_REPO   owner/repo 形式のリポジトリ名（未指定なら git remote origin から取得）
+
+環境変数（GCP）:
+  GCP_PROJECT_ID  Secret Manager の対象 GCP プロジェクト ID（必須）
+  認証: Application Default Credentials（ADC）を使用。
+        GOOGLE_APPLICATION_CREDENTIALS でサービスアカウント鍵を指定、
+        または gcloud auth application-default login で ADC を設定する。
 
 YAML スキーマ:
   secret: true|false  シークレットとして登録するか（デフォルト true）

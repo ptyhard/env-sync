@@ -259,7 +259,7 @@ func TestSync_SecretCreatedAndVersionAdded(t *testing.T) {
 	defer restore()
 
 	p := &gcpProvider{}
-	if err := p.Sync(provider.Options{}, []provider.Entry{
+	if err := p.Sync(provider.Options{Yes: true}, []provider.Entry{
 		{Key: "MY_KEY", Value: "my-val", Secret: true},
 	}); err != nil {
 		t.Fatalf("Sync: %v", err)
