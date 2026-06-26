@@ -1,12 +1,12 @@
-// Command vercel-env-sync は、定義ファイル(vercel-env.yaml)で宣言した環境変数を
+// Command env-sync は、定義ファイル(env-sync.yaml)で宣言した環境変数を
 // Vercel または GitHub Actions へ一括登録(同期)する。
 //
 // 値は定義ファイルには書かず .env(.production) から取得する。
 //
 // 使い方:
 //
-//	VERCEL_TOKEN=xxxxx vercel-env-sync --env .env.production
-//	GITHUB_TOKEN=xxxxx vercel-env-sync --provider github --env .env.production
+//	VERCEL_TOKEN=xxxxx env-sync --env .env.production
+//	GITHUB_TOKEN=xxxxx env-sync --provider github --env .env.production
 //
 // 必須 (Vercel):
 //
@@ -26,7 +26,7 @@
 //
 //	--provider vercel|github  同期先（デフォルト vercel）
 //	--env  <file>             値を読む env ファイル（デフォルト .env）
-//	--def  <file>             type/target 定義 YAML（デフォルト vercel-env.yaml）
+//	--def  <file>             type/target 定義 YAML（デフォルト env-sync.yaml）
 //	--dry-run                 実際には送信せず、登録予定の key/type/target だけ表示（値は出さない）
 //	--yes, -y                 送信前の確認をスキップ
 //	--github-env <name>       GitHub Actions の Environment スコープ（未指定はリポジトリレベル）
@@ -792,7 +792,7 @@ func parseGitHubErrorBody(r io.Reader) string {
 // parseFlags はコマンドライン引数を解析する。flag パッケージは特殊な
 // 短縮形 (-y) と長形 (--yes) の両立や --dry-run の扱いが煩雑なため手で処理する。
 func parseFlags(argv []string) options {
-	opts := options{env: ".env", def: "vercel-env.yaml", provider: "vercel"}
+	opts := options{env: ".env", def: "env-sync.yaml", provider: "vercel"}
 	for i := 0; i < len(argv); i++ {
 		arg := argv[i]
 		next := func() string {
@@ -817,7 +817,7 @@ func parseFlags(argv []string) options {
 		case arg == "--yes" || arg == "-yes" || arg == "-y":
 			opts.yes = true
 		case arg == "--version" || arg == "-version":
-			fmt.Printf("vercel-env-sync version %s (commit: %s, built: %s)\n", version, commit, date)
+			fmt.Printf("env-sync version %s (commit: %s, built: %s)\n", version, commit, date)
 			os.Exit(0)
 		case arg == "--provider" || arg == "-provider":
 			v := next()
@@ -850,20 +850,20 @@ func parseFlags(argv []string) options {
 }
 
 func printUsage() {
-	fmt.Fprint(os.Stderr, `vercel-env-sync - 定義ファイルで宣言した環境変数を Vercel または GitHub Actions へ一括登録(同期)する
+	fmt.Fprint(os.Stderr, `env-sync - 定義ファイルで宣言した環境変数を Vercel または GitHub Actions へ一括登録(同期)する
 
 サブコマンド:
-  init   .env から vercel-env.yaml の雛形を生成する
+  init   .env から env-sync.yaml の雛形を生成する
 
 使い方:
-  VERCEL_TOKEN=xxxxx vercel-env-sync [オプション]
-  GITHUB_TOKEN=xxxxx vercel-env-sync --provider github [オプション]
-  vercel-env-sync init [--env <file>] [--def <file>] [--force]
+  VERCEL_TOKEN=xxxxx env-sync [オプション]
+  GITHUB_TOKEN=xxxxx env-sync --provider github [オプション]
+  env-sync init [--env <file>] [--def <file>] [--force]
 
 オプション（同期）:
   --provider vercel|github  同期先（デフォルト vercel）
   --env <file>              値を読む env ファイル（デフォルト .env）
-  --def <file>              type/target 定義 YAML（デフォルト vercel-env.yaml）
+  --def <file>              type/target 定義 YAML（デフォルト env-sync.yaml）
   --dry-run                 送信せず登録予定の key/type/target だけ表示
   --yes, -y                 送信前の確認をスキップ
   --github-env <name>       GitHub Actions の Environment スコープ（未指定はリポジトリレベル）
@@ -872,7 +872,7 @@ func printUsage() {
 
 オプション（init）:
   --env <file>   読み込む env ファイル（デフォルト .env）
-  --def <file>   出力する YAML ファイル（デフォルト vercel-env.yaml）
+  --def <file>   出力する YAML ファイル（デフォルト env-sync.yaml）
   --force        既存の def ファイルを上書きする
 
 環境変数（Vercel）:
@@ -1025,7 +1025,7 @@ type initOptions struct {
 
 // parseInitFlags は init サブコマンドのコマンドライン引数を解析する。
 func parseInitFlags(argv []string) initOptions {
-	opts := initOptions{env: ".env", def: "vercel-env.yaml"}
+	opts := initOptions{env: ".env", def: "env-sync.yaml"}
 	for i := 0; i < len(argv); i++ {
 		arg := argv[i]
 		next := func() string {
@@ -1068,7 +1068,7 @@ func parseInitFlags(argv []string) initOptions {
 	return opts
 }
 
-// buildInitYAML は keys から vercel-env.yaml の雛形テキストを生成する。
+// buildInitYAML は keys から env-sync.yaml の雛形テキストを生成する。
 // 値は一切含まない。yaml.Marshal は使わず手組みテキスト生成でコメントを差し込む。
 func buildInitYAML(keys []string) string {
 	var sb strings.Builder

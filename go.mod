@@ -1,4 +1,4 @@
-module github.com/ptyhard/vercel-env-sync
+module github.com/ptyhard/env-sync
 
 go 1.25.4
 

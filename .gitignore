@@ -1,5 +1,4 @@
-/vercel-env-sync
-/vercel-env
+/env-sync
 .env
 .env.*
 .vercel/

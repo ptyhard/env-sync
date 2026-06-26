@@ -1,14 +1,14 @@
 version: 2
 
-project_name: vercel-env-sync
+project_name: env-sync
 
 before:
   hooks:
     - go mod tidy
 
 builds:
-  - id: vercel-env-sync
-    binary: vercel-env-sync
+  - id: env-sync
+    binary: env-sync
     main: .
     env:
       - CGO_ENABLED=0
@@ -36,15 +36,15 @@ checksum:
 release:
   github:
     owner: ptyhard
-    name: vercel-env-sync
+    name: env-sync
 
 homebrew_casks:
-  - name: vercel-env-sync
+  - name: env-sync
     repository:
       owner: ptyhard
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    homepage: https://github.com/ptyhard/vercel-env-sync
-    description: "Sync environment variables to Vercel from a definition file"
+    homepage: https://github.com/ptyhard/env-sync
+    description: "Sync environment variables to Vercel or GitHub Actions from a definition file"
     binaries:
-      - vercel-env-sync
+      - env-sync

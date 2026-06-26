@@ -17,8 +17,8 @@ func TestParseFlags_Defaults(t *testing.T) {
 	if opts.env != ".env" {
 		t.Errorf("デフォルト env: got %q, want .env", opts.env)
 	}
-	if opts.def != "vercel-env.yaml" {
-		t.Errorf("デフォルト def: got %q, want vercel-env.yaml", opts.def)
+	if opts.def != "env-sync.yaml" {
+		t.Errorf("デフォルト def: got %q, want env-sync.yaml", opts.def)
 	}
 	if opts.dryRun {
 		t.Error("デフォルト dryRun: got true, want false")
@@ -142,7 +142,7 @@ func TestNormalizeTarget_Slice(t *testing.T) {
 // --version フラグの統合テスト（バイナリをビルドして実行）
 
 func TestVersionFlag(t *testing.T) {
-	bin := t.TempDir() + "/vercel-env-sync-test"
+	bin := t.TempDir() + "/env-sync-test"
 	cmd := exec.Command("go", "build", "-o", bin, ".")
 	cmd.Dir = "."
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -154,13 +154,13 @@ func TestVersionFlag(t *testing.T) {
 		t.Fatalf("--version 実行失敗: %s", err)
 	}
 	got := strings.TrimSpace(string(out))
-	if !strings.HasPrefix(got, "vercel-env-sync version ") {
-		t.Errorf("--version 出力: got %q, want prefix \"vercel-env-sync version \"", got)
+	if !strings.HasPrefix(got, "env-sync version ") {
+		t.Errorf("--version 出力: got %q, want prefix \"env-sync version \"", got)
 	}
 }
 
 func TestVersionFlag_ExitsZero(t *testing.T) {
-	bin := t.TempDir() + "/vercel-env-sync-test"
+	bin := t.TempDir() + "/env-sync-test"
 	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
 		t.Fatalf("ビルド失敗: %s\n%s", err, out)
 	}
@@ -171,7 +171,7 @@ func TestVersionFlag_ExitsZero(t *testing.T) {
 }
 
 func TestHelpFlag_ExitsZero(t *testing.T) {
-	bin := t.TempDir() + "/vercel-env-sync-test"
+	bin := t.TempDir() + "/env-sync-test"
 	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
 		t.Fatalf("ビルド失敗: %s\n%s", err, out)
 	}
@@ -182,14 +182,14 @@ func TestHelpFlag_ExitsZero(t *testing.T) {
 }
 
 func TestDryRunFlag_NoTokenRequired(t *testing.T) {
-	bin := t.TempDir() + "/vercel-env-sync-test"
+	bin := t.TempDir() + "/env-sync-test"
 	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
 		t.Fatalf("ビルド失敗: %s\n%s", err, out)
 	}
 
 	dir := t.TempDir()
 	envFile := dir + "/.env"
-	defFile := dir + "/vercel-env.yaml"
+	defFile := dir + "/env-sync.yaml"
 	if err := os.WriteFile(envFile, []byte("FOO=bar\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +299,7 @@ func TestParseInitFlags_Defaults(t *testing.T) {
 	if opts.env != ".env" {
 		t.Errorf("env のデフォルト値が異なる: got %q", opts.env)
 	}
-	if opts.def != "vercel-env.yaml" {
+	if opts.def != "env-sync.yaml" {
 		t.Errorf("def のデフォルト値が異なる: got %q", opts.def)
 	}
 	if opts.force {
@@ -361,7 +361,7 @@ func TestRunInit_CreatesYAML(t *testing.T) {
 	dir := t.TempDir()
 
 	envFile := filepath.Join(dir, ".env")
-	defFile := filepath.Join(dir, "vercel-env.yaml")
+	defFile := filepath.Join(dir, "env-sync.yaml")
 
 	if err := os.WriteFile(envFile, []byte("DATABASE_URL=postgres://x\nNEXT_PUBLIC_API=https://y\nDEBUG=1\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -397,7 +397,7 @@ func TestRunInit_OverwriteProtection(t *testing.T) {
 	dir := t.TempDir()
 
 	envFile := filepath.Join(dir, ".env")
-	defFile := filepath.Join(dir, "vercel-env.yaml")
+	defFile := filepath.Join(dir, "env-sync.yaml")
 
 	if err := os.WriteFile(envFile, []byte("FOO=bar\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -427,7 +427,7 @@ func TestRunInit_ForceOverwrite(t *testing.T) {
 	dir := t.TempDir()
 
 	envFile := filepath.Join(dir, ".env")
-	defFile := filepath.Join(dir, "vercel-env.yaml")
+	defFile := filepath.Join(dir, "env-sync.yaml")
 
 	if err := os.WriteFile(envFile, []byte("FOO=bar\n"), 0o644); err != nil {
 		t.Fatal(err)
