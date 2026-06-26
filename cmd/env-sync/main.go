@@ -37,6 +37,13 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/ptyhard/env-sync/internal/config"
+	"github.com/ptyhard/env-sync/internal/provider"
+	internalsync "github.com/ptyhard/env-sync/internal/sync"
+
+	_ "github.com/ptyhard/env-sync/internal/provider/github"
+	_ "github.com/ptyhard/env-sync/internal/provider/vercel"
 )
 
 // ldflags で注入するバージョン情報。
@@ -59,60 +66,64 @@ func die(format string, a ...interface{}) error {
 
 func run() error {
 	args := os.Args[1:]
+
 	if len(args) > 0 && args[0] == "init" {
-		return runInit(args[1:])
+		return config.RunInit(args[1:], printUsage)
 	}
 
-	opts := parseFlags(args)
+	printVersion := func() {
+		fmt.Printf("env-sync version %s (commit: %s, built: %s)\n", version, commit, date)
+	}
+	opts := config.ParseFlags(args, printUsage, printVersion)
 
 	// ---- 入力読み込み ----
-	if !fileExists(opts.env) {
-		return die("env ファイルが見つかりません: %s", opts.env)
+	if !config.FileExists(opts.Env) {
+		return die("env ファイルが見つかりません: %s", opts.Env)
 	}
-	if !fileExists(opts.def) {
-		return die("定義ファイルが見つかりません: %s", opts.def)
+	if !config.FileExists(opts.Def) {
+		return die("定義ファイルが見つかりません: %s", opts.Def)
 	}
 
-	envText, err := os.ReadFile(opts.env)
+	envText, err := os.ReadFile(opts.Env)
 	if err != nil {
 		return die("env ファイルの読み込みに失敗: %s", err)
 	}
-	envVars := parseDotenv(string(envText))
+	envVars := config.ParseDotenv(string(envText))
 
-	defText, err := os.ReadFile(opts.def)
+	defText, err := os.ReadFile(opts.Def)
 	if err != nil {
 		return die("定義ファイルの読み込みに失敗: %s", err)
 	}
-	var def definition
+	var def config.Definition
 	if err := yaml.Unmarshal(defText, &def); err != nil {
 		return die("定義ファイルの YAML パースに失敗: %s", err)
 	}
 
 	// ---- 整合性チェック（provider 共通） ----
-	defKeys := sortedKeys(def.Variables)
+	defKeys := config.SortedKeys(def.Variables)
 	defKeySet := make(map[string]bool, len(defKeys))
 	for _, k := range defKeys {
 		defKeySet[k] = true
 	}
 	for _, k := range defKeys {
 		if _, ok := envVars[k]; !ok {
-			fmt.Fprintf(os.Stderr, "⚠ %s: 定義にあるが %s に値が無いためスキップ\n", k, opts.env)
+			fmt.Fprintf(os.Stderr, "⚠ %s: 定義にあるが %s に値が無いためスキップ\n", k, opts.Env)
 		}
 	}
-	for _, k := range sortedStrKeys(envVars) {
+	for _, k := range config.SortedStrKeys(envVars) {
 		if !defKeySet[k] {
-			fmt.Fprintf(os.Stderr, "⚠ %s: %s にあるが定義に無いためスキップ\n", k, opts.env)
+			fmt.Fprintf(os.Stderr, "⚠ %s: %s にあるが定義に無いためスキップ\n", k, opts.Env)
 		}
 	}
 
 	// ---- Entry に変換（provider 解決を含む） ----
-	entries, err := resolveEntries(def, envVars, defKeys, opts.provider)
+	entries, err := internalsync.ResolveEntries(def, envVars, defKeys, opts.Provider)
 	if err != nil {
 		return err
 	}
 
 	// ---- プロバイダーごとに振り分け ----
-	providerEntries := map[string][]Entry{}
+	providerEntries := map[string][]provider.Entry{}
 	for _, e := range entries {
 		for _, pname := range e.Providers {
 			providerEntries[pname] = append(providerEntries[pname], e)
@@ -120,7 +131,7 @@ func run() error {
 	}
 
 	// ---- dry-run: 統合一覧表示して終了 ----
-	if opts.dryRun {
+	if opts.DryRun {
 		if len(entries) == 0 {
 			fmt.Println("登録対象がありません")
 		} else {
@@ -149,12 +160,12 @@ func run() error {
 	}
 
 	// ---- プロバイダーへ同期（登録順） ----
-	for _, pname := range registeredProviderNames() {
+	for _, pname := range provider.RegisteredProviderNames() {
 		ents, ok := providerEntries[pname]
 		if !ok {
 			continue
 		}
-		p, _ := lookupProvider(pname)
+		p, _ := provider.LookupProvider(pname)
 		if err := p.Sync(opts, ents); err != nil {
 			return err
 		}

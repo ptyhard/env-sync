@@ -24,7 +24,7 @@ brew install ptyhard/tap/env-sync
 ### go install
 
 ```bash
-go install github.com/ptyhard/env-sync@latest
+go install github.com/ptyhard/env-sync/cmd/env-sync@latest
 ```
 
 ### バイナリを直接ダウンロード
@@ -35,7 +35,7 @@ darwin/amd64、darwin/arm64、linux/amd64、linux/arm64 向けアーカイブが
 ### ソースからビルド
 
 ```bash
-go build -o env-sync .
+go build -o env-sync ./cmd/env-sync
 ```
 
 ## リリース（メンテナ向け）

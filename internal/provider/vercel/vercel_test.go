@@ -1,10 +1,12 @@
-package main
+package vercel
 
 import (
 	"encoding/json"
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/ptyhard/env-sync/internal/provider"
 )
 
 // item の JSON マーシャル形式テスト（key/value/type/target フィールド名）
@@ -116,7 +118,7 @@ func TestParseErrorBody(t *testing.T) {
 // --- entriesToVercelItems のテスト ---
 
 func TestEntriesToVercelItems_SecretTrue_TypeSensitive(t *testing.T) {
-	entries := []Entry{
+	entries := []provider.Entry{
 		{Key: "FOO", Value: "bar", Secret: true, Environments: []string{"production"}},
 	}
 	items, err := entriesToVercelItems(entries)
@@ -132,7 +134,7 @@ func TestEntriesToVercelItems_SecretTrue_TypeSensitive(t *testing.T) {
 }
 
 func TestEntriesToVercelItems_SecretFalse_TypePlain(t *testing.T) {
-	entries := []Entry{
+	entries := []provider.Entry{
 		{Key: "FOO", Value: "bar", Secret: false, Environments: []string{"production"}},
 	}
 	items, err := entriesToVercelItems(entries)
@@ -145,7 +147,7 @@ func TestEntriesToVercelItems_SecretFalse_TypePlain(t *testing.T) {
 }
 
 func TestEntriesToVercelItems_EmptyEnvironments_DefaultTarget(t *testing.T) {
-	entries := []Entry{
+	entries := []provider.Entry{
 		{Key: "FOO", Value: "bar", Secret: true, Environments: nil},
 	}
 	items, err := entriesToVercelItems(entries)
@@ -161,7 +163,7 @@ func TestEntriesToVercelItems_EmptyEnvironments_DefaultTarget(t *testing.T) {
 }
 
 func TestEntriesToVercelItems_InvalidEnvironment_Error(t *testing.T) {
-	entries := []Entry{
+	entries := []provider.Entry{
 		{Key: "FOO", Value: "bar", Secret: true, Environments: []string{"staging"}},
 	}
 	_, err := entriesToVercelItems(entries)
@@ -174,7 +176,7 @@ func TestEntriesToVercelItems_InvalidEnvironment_Error(t *testing.T) {
 }
 
 func TestEntriesToVercelItems_ValidEnvironments(t *testing.T) {
-	entries := []Entry{
+	entries := []provider.Entry{
 		{Key: "FOO", Value: "bar", Secret: false, Environments: []string{"production", "preview", "development"}},
 	}
 	items, err := entriesToVercelItems(entries)

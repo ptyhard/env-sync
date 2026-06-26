@@ -1,4 +1,5 @@
-package main
+// Package github は GitHub Actions Secrets/Variables への環境変数同期を実装する provider。
+package github
 
 import (
 	"bufio"
@@ -15,6 +16,9 @@ import (
 	"strings"
 
 	"golang.org/x/crypto/nacl/box"
+
+	"github.com/ptyhard/env-sync/internal/config"
+	"github.com/ptyhard/env-sync/internal/provider"
 )
 
 // githubAPIBase は GitHub REST API のベース URL。テストで httptest.Server を
@@ -22,7 +26,7 @@ import (
 var githubAPIBase = "https://api.github.com"
 
 func init() {
-	registerProvider("github", func() Provider { return &githubProvider{} })
+	provider.RegisterProvider("github", func() provider.Provider { return &githubProvider{} })
 }
 
 // githubProvider は GitHub Actions への同期を担当する Provider 実装。
@@ -34,13 +38,13 @@ func (g *githubProvider) Name() string { return "github" }
 // envScope が空のときはリポジトリレベル、それ以外は named environment スコープ。
 type githubTask struct {
 	envScope string
-	entry    Entry
+	entry    provider.Entry
 }
 
 // expandGitHubTasks は Entry スライスを githubTask スライスに展開する純粋関数。
 // Entry.Environments が空 → envScope="" (repoレベル) の task 1件
 // Entry.Environments が非空 → 各 envScope の task
-func expandGitHubTasks(entries []Entry) []githubTask {
+func expandGitHubTasks(entries []provider.Entry) []githubTask {
 	var tasks []githubTask
 	for _, e := range entries {
 		if len(e.Environments) == 0 {
@@ -55,10 +59,10 @@ func expandGitHubTasks(entries []Entry) []githubTask {
 }
 
 // Sync は GitHub Actions への環境変数/シークレット同期を行う。
-func (g *githubProvider) Sync(opts options, entries []Entry) error {
+func (g *githubProvider) Sync(opts provider.Options, entries []provider.Entry) error {
 	token := os.Getenv("GITHUB_TOKEN")
-	if !opts.dryRun && token == "" {
-		return die("GITHUB_TOKEN が未設定です")
+	if !opts.DryRun && token == "" {
+		return fmt.Errorf("GITHUB_TOKEN が未設定です")
 	}
 
 	// ---- リポジトリ解決 ----
@@ -90,15 +94,15 @@ func (g *githubProvider) Sync(opts options, entries []Entry) error {
 		fmt.Println("登録対象がありません")
 		return nil
 	}
-	if opts.dryRun {
+	if opts.DryRun {
 		fmt.Println("[dry-run] 送信しません")
 		return nil
 	}
 
 	// ---- 確認 ----
-	if !opts.yes {
-		if !isTTY(os.Stdin) {
-			return die("対話できない環境です。確認をスキップするには --yes を付けてください")
+	if !opts.Yes {
+		if !config.IsTTY(os.Stdin) {
+			return fmt.Errorf("対話できない環境です。確認をスキップするには --yes を付けてください")
 		}
 		fmt.Print("上記を GitHub に登録します。続行しますか? (y/N) ")
 		reader := bufio.NewReader(os.Stdin)
@@ -189,12 +193,12 @@ func resolveGitHubRepo() (owner, repo string, err error) {
 	if repoEnv != "" {
 		parts := strings.Split(repoEnv, "/")
 		if len(parts) != 2 {
-			return "", "", die("GITHUB_REPO の形式が不正です（owner/repo 形式で指定してください）")
+			return "", "", fmt.Errorf("GITHUB_REPO の形式が不正です（owner/repo 形式で指定してください）")
 		}
 		owner := strings.TrimSpace(parts[0])
 		repo := strings.TrimSpace(parts[1])
 		if owner == "" || repo == "" {
-			return "", "", die("GITHUB_REPO の形式が不正です（owner/repo 形式で指定してください）")
+			return "", "", fmt.Errorf("GITHUB_REPO の形式が不正です（owner/repo 形式で指定してください）")
 		}
 		return owner, repo, nil
 	}
@@ -202,7 +206,7 @@ func resolveGitHubRepo() (owner, repo string, err error) {
 	// git remote から取得
 	o, r, ok := repoFromGitRemote()
 	if !ok {
-		return "", "", die("GITHUB_REPO を指定してください（git remote origin が GitHub でないか、git が使えません）")
+		return "", "", fmt.Errorf("GITHUB_REPO を指定してください（git remote origin が GitHub でないか、git が使えません）")
 	}
 	return o, r, nil
 }

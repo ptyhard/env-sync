@@ -1,12 +1,12 @@
-package main
+package config
 
 import "testing"
 
-// parseDotenv のテスト
+// ParseDotenv のテスト
 
 func TestParseDotenv_Basic(t *testing.T) {
 	input := "FOO=bar\nBAZ=qux\n"
-	got := parseDotenv(input)
+	got := ParseDotenv(input)
 	if got["FOO"] != "bar" {
 		t.Errorf("FOO: got %q, want bar", got["FOO"])
 	}
@@ -17,7 +17,7 @@ func TestParseDotenv_Basic(t *testing.T) {
 
 func TestParseDotenv_SkipsComments(t *testing.T) {
 	input := "# comment\nFOO=bar\n"
-	got := parseDotenv(input)
+	got := ParseDotenv(input)
 	if _, ok := got["# comment"]; ok {
 		t.Error("コメント行がキーとして解釈された")
 	}
@@ -28,7 +28,7 @@ func TestParseDotenv_SkipsComments(t *testing.T) {
 
 func TestParseDotenv_QuotedValues(t *testing.T) {
 	input := `FOO="hello world"` + "\nBAR='single'\n"
-	got := parseDotenv(input)
+	got := ParseDotenv(input)
 	if got["FOO"] != "hello world" {
 		t.Errorf("ダブルクォート: got %q, want \"hello world\"", got["FOO"])
 	}
@@ -39,7 +39,7 @@ func TestParseDotenv_QuotedValues(t *testing.T) {
 
 func TestParseDotenv_ExportPrefix(t *testing.T) {
 	input := "export FOO=bar\n"
-	got := parseDotenv(input)
+	got := ParseDotenv(input)
 	if got["FOO"] != "bar" {
 		t.Errorf("export 付き: got %q, want bar", got["FOO"])
 	}
@@ -47,7 +47,7 @@ func TestParseDotenv_ExportPrefix(t *testing.T) {
 
 func TestParseDotenv_EmptyLines(t *testing.T) {
 	input := "\n\nFOO=bar\n\n"
-	got := parseDotenv(input)
+	got := ParseDotenv(input)
 	if len(got) != 1 {
 		t.Errorf("空行を含むとき: got %d keys, want 1", len(got))
 	}
