@@ -24,6 +24,16 @@ type Entry struct {
 //   - providers: varConf.Provider → defaults.Provider → cliProvider の優先順位で解決する。
 //     不正なプロバイダー値はエラーを返す。
 func resolveEntries(def definition, envVars map[string]string, defKeys []string, cliProvider string) ([]Entry, error) {
+	// defaults.provider の値を事前検証する。varConf で上書きされても不正値は許容しない。
+	if def.Defaults.Provider != nil {
+		for _, p := range def.Defaults.Provider.Values {
+			if trimmed := strings.TrimSpace(p); trimmed != "" && !isRegisteredProvider(trimmed) {
+				names := strings.Join(registeredProviderNames(), " / ")
+				return nil, fmt.Errorf("defaults.provider: 不正な provider 値 %q（%s のいずれかを指定してください）", trimmed, names)
+			}
+		}
+	}
+
 	var entries []Entry
 	for _, key := range defKeys {
 		val, ok := envVars[key]
@@ -76,6 +86,11 @@ func resolveEntries(def definition, envVars map[string]string, defKeys []string,
 		}
 		// [vercel, vercel] のような重複指定で二重 Sync にならないよう排除する
 		providers = deduplicateProviders(providers)
+		// dedup 後に空になった場合（例: provider: " "）は設定ミスとしてエラー
+		if len(providers) == 0 {
+			names := strings.Join(registeredProviderNames(), " / ")
+			return nil, fmt.Errorf("%s: provider の指定が空または空白のみです（%s のいずれかを指定してください）", key, names)
+		}
 
 		// provider 値の検証
 		for _, p := range providers {

@@ -260,6 +260,35 @@ func TestResolveEntries_ProviderBoth(t *testing.T) {
 	}
 }
 
+// provider に空白のみを指定すると dedup 後に空になりエラーを返す（静かに落ちない）
+func TestResolveEntries_ProviderWhitespaceOnlyError(t *testing.T) {
+	pv := &ProviderVal{Values: []string{" "}}
+	def := definition{
+		Variables: map[string]varConf{
+			"FOO": {Provider: pv},
+		},
+	}
+	envVars := map[string]string{"FOO": "bar"}
+	_, err := resolveEntries(def, envVars, []string{"FOO"}, "vercel")
+	if err == nil {
+		t.Error("空白のみの provider 値でエラーが返らなかった")
+	}
+}
+
+// defaults.provider に不正値があれば varConf で上書きされていてもエラーを返す
+func TestResolveEntries_DefaultsProviderInvalidAlwaysChecked(t *testing.T) {
+	def := definition{}
+	def.Defaults.Provider = &ProviderVal{Values: []string{"gitlab"}} // 不正値
+	def.Variables = map[string]varConf{
+		"FOO": {Provider: &ProviderVal{Values: []string{"vercel"}}}, // 上書きしても
+	}
+	envVars := map[string]string{"FOO": "bar"}
+	_, err := resolveEntries(def, envVars, []string{"FOO"}, "vercel")
+	if err == nil {
+		t.Error("defaults.provider の不正値が varConf で上書きされても検証されるべき")
+	}
+}
+
 // 不正な provider 値はエラーを返す
 func TestResolveEntries_ProviderInvalid(t *testing.T) {
 	pv := &ProviderVal{Values: []string{"gitlab"}}
