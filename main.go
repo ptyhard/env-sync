@@ -384,7 +384,7 @@ func syncGitHub(opts options, envVars map[string]string, def definition, defKeys
 	envScope := opts.githubEnv
 	scopeLabel := "リポジトリ"
 	if envScope != "" {
-		scopeLabel = "env: " + envScope
+		scopeLabel = envScope
 	}
 	fmt.Printf("対象リポジトリ: %s/%s (env スコープ: %s)\n", owner, repo, scopeLabel)
 	fmt.Printf("登録対象 %d 件:\n", len(items))
