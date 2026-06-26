@@ -480,13 +480,18 @@ func syncGitHub(opts options, envVars map[string]string, def definition, defKeys
 
 // resolveGitHubRepo は GITHUB_REPO 環境変数または git remote から owner/repo を解決する。
 func resolveGitHubRepo() (owner, repo string, err error) {
-	repoEnv := os.Getenv("GITHUB_REPO")
+	repoEnv := strings.TrimSpace(os.Getenv("GITHUB_REPO"))
 	if repoEnv != "" {
-		parts := strings.SplitN(repoEnv, "/", 2)
-		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		parts := strings.Split(repoEnv, "/")
+		if len(parts) != 2 {
 			return "", "", die("GITHUB_REPO の形式が不正です（owner/repo 形式で指定してください）")
 		}
-		return parts[0], parts[1], nil
+		owner := strings.TrimSpace(parts[0])
+		repo := strings.TrimSpace(parts[1])
+		if owner == "" || repo == "" {
+			return "", "", die("GITHUB_REPO の形式が不正です（owner/repo 形式で指定してください）")
+		}
+		return owner, repo, nil
 	}
 
 	// git remote から取得

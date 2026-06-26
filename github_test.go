@@ -9,6 +9,43 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// --- resolveGitHubRepo の GITHUB_REPO パーステスト ---
+
+func TestResolveGitHubRepo_FromEnv(t *testing.T) {
+	tests := []struct {
+		name      string
+		repoEnv   string
+		wantOwner string
+		wantRepo  string
+		wantErr   bool
+	}{
+		{"正常", "owner/repo", "owner", "repo", false},
+		{"前後空白あり", "  owner / repo  ", "owner", "repo", false},
+		{"3 セグメントは不正", "owner/repo/extra", "", "", true},
+		{"スラッシュなしは不正", "ownerrepo", "", "", true},
+		{"owner 空は不正", "/repo", "", "", true},
+		{"repo 空は不正", "owner/", "", "", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("GITHUB_REPO", tc.repoEnv)
+			owner, repo, err := resolveGitHubRepo()
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("エラーを期待したが nil（owner=%q repo=%q）", owner, repo)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("予期しないエラー: %v", err)
+			}
+			if owner != tc.wantOwner || repo != tc.wantRepo {
+				t.Errorf("owner/repo = %q/%q, want %q/%q", owner, repo, tc.wantOwner, tc.wantRepo)
+			}
+		})
+	}
+}
+
 // --- repoFromGitRemote のパーサテスト ---
 
 func TestParseGitHubRemoteURL(t *testing.T) {
