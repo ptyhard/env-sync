@@ -321,8 +321,8 @@ func (cfg *AppConfig) ResolveGitHubRepo() string {
 	return cfg.GitHub.Repo
 }
 
-// resolveVercelToken はトークンの解決優先順位（per-target > top-level config > 環境変数）を実装する。
-// perTargetToken が非空ならそれを返す。空なら top-level の ResolveVercelToken() を使う。
+// resolveVercelToken はトークンの解決優先順位（per-target > 環境変数 > top-level config）を実装する。
+// perTargetToken が非空ならそれを返す。空なら top-level の ResolveVercelToken()（環境変数 > config）を使う。
 func (cfg *AppConfig) resolveVercelToken(perTargetToken string) string {
 	if perTargetToken != "" {
 		return perTargetToken
@@ -330,7 +330,8 @@ func (cfg *AppConfig) resolveVercelToken(perTargetToken string) string {
 	return cfg.ResolveVercelToken()
 }
 
-// resolveVercelTeamID はチーム ID の解決優先順位（per-target > top-level config > 環境変数）を実装する。
+// resolveVercelTeamID はチーム ID の解決優先順位（per-target > 環境変数 > top-level config）を実装する。
+// perTargetTeamID が非空ならそれを返す。空なら ResolveVercelTeamID()（環境変数 > config）を使う。
 func (cfg *AppConfig) resolveVercelTeamID(perTargetTeamID string) string {
 	if perTargetTeamID != "" {
 		return perTargetTeamID
@@ -338,7 +339,8 @@ func (cfg *AppConfig) resolveVercelTeamID(perTargetTeamID string) string {
 	return cfg.ResolveVercelTeamID()
 }
 
-// resolveGitHubToken はトークンの解決優先順位（per-target > top-level config > 環境変数）を実装する。
+// resolveGitHubToken はトークンの解決優先順位（per-target > 環境変数 > top-level config）を実装する。
+// perTargetToken が非空ならそれを返す。空なら ResolveGitHubToken()（環境変数 > config）を使う。
 func (cfg *AppConfig) resolveGitHubToken(perTargetToken string) string {
 	if perTargetToken != "" {
 		return perTargetToken
