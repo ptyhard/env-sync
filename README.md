@@ -41,19 +41,44 @@ go build -o env-sync ./cmd/env-sync
 ## クイックスタート
 
 ```bash
-# 1. 既存の .env から定義ファイルの雛形を生成
+# 1. 認証情報 config を対話生成（Vercel token / project_id / GitHub token / repo を設定）
+env-sync setup
+
+# 2. 既存の .env から定義ファイルの雛形を生成
 env-sync init
 
-# 2. 生成された env-sync.yaml の secret / environments / provider を見直す
+# 3. 生成された env-sync.yaml の secret / environments / provider を見直す
 
-# 3. 送信せずに登録予定を確認（dry-run）
+# 4. 送信せずに登録予定を確認（dry-run）
 VERCEL_TOKEN=xxxxx env-sync --env .env.production --dry-run
 
-# 4. 本番投入（更新がある場合のみ y/N 確認）
+# 5. 本番投入（更新がある場合のみ y/N 確認）
 VERCEL_TOKEN=xxxxx env-sync --env .env.production
 ```
 
-## 1. init で雛形を生成
+## 1. setup で認証情報 config を生成
+
+認証情報 config ファイル（`.env-sync.config.yaml` または `~/.config/env-sync/config.yaml`）を対話プロンプトで生成します。
+
+```bash
+# プロジェクト config（.env-sync.config.yaml）を生成
+env-sync setup
+
+# global config（~/.config/env-sync/config.yaml）を生成
+env-sync setup --global
+
+# 既存ファイルを上書き（--force なしでは上書きを拒否してエラー）
+env-sync setup --force
+```
+
+- Vercel / GitHub それぞれについて、設定するか・project_id・repo・token 入力方法を順に質問します
+- **token はデフォルトで `${VERCEL_TOKEN}` / `${GITHUB_TOKEN}` の環境変数参照形式**で書き出されます（平文トークンをファイルに書かずに済む推奨形式）
+- 生 token を直接書く場合、または `--global` 出力時はファイルを **0600** で作成し、その旨を案内します
+- 非対話環境（TTY なし）では手書き方法を案内してエラーで停止します
+
+> **注意**: このファイルをコミットしないよう `.gitignore` に `.env-sync.config.yaml` を追記することを推奨します。
+
+## 2. init で変数定義の雛形を生成
 
 既存の `.env` を読み込み、値を含まない `env-sync.yaml` の雛形を自動生成します。
 
@@ -76,7 +101,7 @@ env-sync init --env .env.production --force
 - **値は一切書き込まれません**（`.env` の値が yaml に混入することはありません）
 - 既存の `env-sync.yaml` がある場合、`--force` なしでは上書きを拒否してエラーで終了します
 
-## 2. Vercel へ同期
+## 3. Vercel へ同期
 
 ### 事前準備
 
@@ -106,7 +131,7 @@ VERCEL_TOKEN=xxxxx env-sync --env .env.production --yes
 `--yes`（`-y`）を付けると確認をスキップできます。非対話環境（TTY なし）で更新対象があり `--yes` がない場合は安全のためエラーで停止します。
 `--dry-run` 時もトークンが設定されていれば新規/更新の分類を表示します（送信はしません）。
 
-## 3. GitHub Actions へ同期
+## 4. GitHub Actions へ同期
 
 `--provider github` を指定すると GitHub Actions の Secrets/Variables に同期します。
 
@@ -155,7 +180,7 @@ variables:
 - 公開鍵の長さ（32 バイト）を検証し、不正な鍵では処理を中止します。
 - 公開鍵キャッシュは envScope（environment）ごとに管理します（スコープで鍵が異なるため）。
 
-## 4. Vercel と GitHub Actions を混在させる
+## 5. Vercel と GitHub Actions を混在させる
 
 変数ごとに `provider` を指定すると、1 つの `env-sync.yaml` から Vercel と GitHub Actions の両方へ同時に同期できます。
 
@@ -191,7 +216,7 @@ VERCEL_TOKEN=xxxxx GITHUB_TOKEN=yyyyy env-sync --env .env.production
 
 不正な値（`vercel` / `github` 以外）を指定するとエラーで中止します。`--dry-run` では各変数の `providers` 列で振り分け先を確認できます。
 
-## 5. config ファイルで認証情報・ID を管理する
+## 6. config ファイルで認証情報・ID を管理する
 
 環境変数の代わりに YAML ファイルでトークンや ID を管理できます。毎回 `VERCEL_TOKEN=...` を渡す手間を省けます。
 

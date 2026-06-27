@@ -182,6 +182,10 @@ func run() error {
 		return config.RunInit(args[1:], printUsage)
 	}
 
+	if len(args) > 0 && args[0] == "setup" {
+		return config.RunSetup(args[1:], printUsage)
+	}
+
 	printVersion := func() {
 		v, c, d := versionInfo()
 		fmt.Printf("env-sync version %s (commit: %s, built: %s)\n", v, c, d)
@@ -267,12 +271,14 @@ func printUsage() {
 	fmt.Fprint(os.Stderr, `env-sync - 定義ファイルで宣言した環境変数を Vercel または GitHub Actions へ一括登録(同期)する
 
 サブコマンド:
-  init   .env から env-sync.yaml の雛形を生成する
+  init    .env から env-sync.yaml の雛形を生成する
+  setup   認証情報 config ファイル（.env-sync.config.yaml / ~/.config/env-sync/config.yaml）を対話生成する
 
 使い方:
   VERCEL_TOKEN=xxxxx env-sync [オプション]
   GITHUB_TOKEN=xxxxx env-sync --provider github [オプション]
   env-sync init [--env <file>] [--def <file>] [--force]
+  env-sync setup [--global] [--force]
 
 オプション（同期）:
   --provider <name>         同期先（デフォルト vercel）
@@ -294,6 +300,10 @@ func printUsage() {
   --env <file>   読み込む env ファイル（デフォルト .env）
   --def <file>   出力する YAML ファイル（デフォルト env-sync.yaml）
   --force        既存の def ファイルを上書きする
+
+オプション（setup）:
+  --global       ~/.config/env-sync/config.yaml（XDG_CONFIG_HOME 尊重）へ出力（デフォルトは .env-sync.config.yaml）
+  --force        既存の config ファイルを上書きする
 
 環境変数（Vercel）:
   VERCEL_TOKEN       Vercel のアクセストークン（必須、dry-run 時は不要）
