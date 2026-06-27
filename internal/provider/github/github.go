@@ -145,10 +145,12 @@ func (g *githubProvider) Sync(opts provider.Options, entries []provider.Entry) e
 	client := &http.Client{Timeout: httpTimeout}
 
 	// perTargetClassified はターゲット順に分類結果を保持し、確認・送信フェーズで再利用する。
+	// skipped が true のターゲットはトークン未設定のためスキップ済み（複数ターゲット時の失敗集約用）。
 	type resolvedTarget struct {
 		owner, repo string
 		token       string
 		classified  []githubClassifiedTask
+		skipped     bool // トークン未設定により送信をスキップするターゲット
 	}
 	resolved := make([]resolvedTarget, 0, len(targets))
 
@@ -160,9 +162,15 @@ func (g *githubProvider) Sync(opts provider.Options, entries []provider.Entry) e
 		}
 
 		// per-target トークンを決定
+		// 単一ターゲット時は即エラー返却。複数ターゲット時は失敗として記録して残りを継続する。
 		targetToken := tgt.Token
 		if !opts.DryRun && targetToken == "" {
-			return fmt.Errorf("GITHUB_TOKEN が未設定です（リポジトリ %q: 環境変数 GITHUB_TOKEN または config ファイルの token で指定してください）", tgt.Name)
+			if len(targets) == 1 {
+				return fmt.Errorf("GITHUB_TOKEN が未設定です（リポジトリ %q: 環境変数 GITHUB_TOKEN または config ファイルの token で指定してください）", tgt.Name)
+			}
+			fmt.Fprintf(os.Stderr, "✗ リポジトリ %q: GITHUB_TOKEN が未設定です（このターゲットをスキップして残りを継続します）\n", tgt.Name)
+			resolved = append(resolved, resolvedTarget{owner: ownerStr, repo: repoStr, skipped: true})
+			continue
 		}
 
 		// 既存確認して新規/更新を分類（結果を保存して後で再利用し、二重呼び出しを避ける）
@@ -248,8 +256,14 @@ func (g *githubProvider) Sync(opts provider.Options, entries []provider.Entry) e
 	}
 
 	// ---- 各ターゲットへ送信（保存済み分類を再利用して存在確認の二重呼び出しを避ける）----
+	// skipped が true のターゲットはトークン未設定のため送信をスキップし、失敗として集計する。
 	totalOK, totalNG := 0, 0
 	for _, r := range resolved {
+		if r.skipped {
+			// 一覧表示フェーズで警告済み。失敗件数として集計する。
+			totalNG += len(tasks)
+			continue
+		}
 		if len(resolved) > 1 {
 			fmt.Printf("\n--- リポジトリ: %s/%s ---\n", r.owner, r.repo)
 		}

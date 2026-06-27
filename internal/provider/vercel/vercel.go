@@ -91,11 +91,19 @@ func (v *vercelProvider) Sync(opts provider.Options, entries []provider.Entry) e
 
 	// ---- 各ターゲットに対して一覧表示と分類（dry-run も同様）----
 	// perTargetClassified はターゲット順に分類結果を保持し、確認・送信フェーズで再利用する。
+	// tokenMissing はトークン未設定のターゲットインデックスを記録する（複数ターゲット時の失敗集約用）。
 	perTargetClassified := make([][]classifiedVercelItem, len(targets))
+	tokenMissing := make([]bool, len(targets))
 	for i, tgt := range targets {
 		// トークン未設定チェック（per-target）
+		// 単一ターゲット時は即エラー返却。複数ターゲット時は失敗として記録して残りを継続する。
 		if !opts.DryRun && tgt.Token == "" {
-			return fmt.Errorf("VERCEL_TOKEN が未設定です（プロジェクト %q: 環境変数 VERCEL_TOKEN または config ファイルの token で指定してください）", tgt.Name)
+			if len(targets) == 1 {
+				return fmt.Errorf("VERCEL_TOKEN が未設定です（プロジェクト %q: 環境変数 VERCEL_TOKEN または config ファイルの token で指定してください）", tgt.Name)
+			}
+			tokenMissing[i] = true
+			fmt.Fprintf(os.Stderr, "✗ プロジェクト %q: VERCEL_TOKEN が未設定です（このターゲットをスキップして残りを継続します）\n", tgt.Name)
+			continue
 		}
 
 		// 既存 key を問い合わせて新規/更新を分類（結果を保存して後で再利用）
@@ -183,8 +191,14 @@ func (v *vercelProvider) Sync(opts provider.Options, entries []provider.Entry) e
 	}
 
 	// ---- 各ターゲットへ送信 ----
+	// tokenMissing[i] が true のターゲットはトークン未設定のため送信をスキップし、失敗として集計する。
 	totalOK, totalNG := 0, 0
-	for _, tgt := range targets {
+	for i, tgt := range targets {
+		if tokenMissing[i] {
+			// 一覧表示フェーズで警告済み。失敗件数として集計する。
+			totalNG += len(items)
+			continue
+		}
 		targetLabel := tgt.ProjectID
 		if tgt.Name != "" {
 			targetLabel = tgt.Name
