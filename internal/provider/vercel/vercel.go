@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/ptyhard/env-sync/internal/config"
 	"github.com/ptyhard/env-sync/internal/provider"
@@ -20,6 +21,9 @@ import (
 // apiBase は Vercel REST API のベース URL。テストで httptest.Server を
 // 指す差し替えができるよう var にしている。
 var apiBase = "https://api.vercel.com"
+
+// httpTimeout は Vercel API 呼び出しの HTTP タイムアウト。
+const httpTimeout = 30 * time.Second
 
 func init() {
 	provider.RegisterProvider("vercel", func() provider.Provider { return &vercelProvider{} })
@@ -66,7 +70,8 @@ func (v *vercelProvider) Sync(opts provider.Options, entries []provider.Entry) e
 	}
 
 	// ---- 既存 key を問い合わせて新規/更新を分類 ----
-	client := &http.Client{}
+	// ネットワーク不調時に無期限ハングしないようタイムアウトを設定する。
+	client := &http.Client{Timeout: httpTimeout}
 	var classified []classifiedVercelItem
 	if token != "" {
 		existing, err := vercelFetchExistingKeys(client, token, projectID, teamID)
@@ -217,7 +222,11 @@ func vercelFetchExistingKeys(client *http.Client, token, projectID, teamID strin
 	defer res.Body.Close()
 
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("既存 key 取得失敗: HTTP %d", res.StatusCode)
+		msg := fmt.Sprintf("HTTP %d", res.StatusCode)
+		if detail := parseErrorBody(res.Body); detail != "" {
+			msg += ": " + detail
+		}
+		return nil, fmt.Errorf("既存 key 取得失敗: %s", msg)
 	}
 
 	var resp struct {

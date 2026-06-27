@@ -331,6 +331,67 @@ func TestGitHubUpdateVariable_EnvironmentScope(t *testing.T) {
 	}
 }
 
+func TestGitHubSecretExists(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		want   bool
+		errOK  bool
+	}{
+		{"存在する", http.StatusOK, true, false},
+		{"存在しない", http.StatusNotFound, false, false},
+		{"サーバエラー", http.StatusInternalServerError, false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet {
+					t.Errorf("method = %s, want GET", r.Method)
+				}
+				if r.URL.Path != "/repos/owner/repo/actions/secrets/MY_SECRET" {
+					t.Errorf("path = %s, want repo-level secret GET", r.URL.Path)
+				}
+				w.WriteHeader(tc.status)
+			}))
+			defer srv.Close()
+			withGitHubAPIBase(t, srv.URL)
+
+			got, err := githubSecretExists(srv.Client(), "tok", "owner", "repo", "", "MY_SECRET")
+			if tc.errOK && err == nil {
+				t.Fatal("エラーを期待したが nil")
+			}
+			if !tc.errOK && err != nil {
+				t.Fatalf("予期しないエラー: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("exists = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestGitHubSecretExists_EnvironmentScope(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("method = %s, want GET", r.Method)
+		}
+		if r.URL.Path != "/repos/owner/repo/environments/staging/secrets/MY_SECRET" {
+			t.Errorf("path = %s, want environment-scoped secret GET", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	withGitHubAPIBase(t, srv.URL)
+
+	got, err := githubSecretExists(srv.Client(), "tok", "owner", "repo", "staging", "MY_SECRET")
+	if err != nil {
+		t.Fatalf("予期しないエラー: %v", err)
+	}
+	if !got {
+		t.Error("exists = false, want true")
+	}
+}
+
 func TestParseGitHubErrorBody(t *testing.T) {
 	cases := []struct {
 		name string

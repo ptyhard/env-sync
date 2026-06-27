@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/nacl/box"
 
@@ -24,6 +25,9 @@ import (
 // githubAPIBase は GitHub REST API のベース URL。テストで httptest.Server を
 // 指す差し替えができるよう var にしている。
 var githubAPIBase = "https://api.github.com"
+
+// httpTimeout は GitHub API 呼び出しの HTTP タイムアウト。
+const httpTimeout = 30 * time.Second
 
 func init() {
 	provider.RegisterProvider("github", func() provider.Provider { return &githubProvider{} })
@@ -64,8 +68,8 @@ func expandGitHubTasks(entries []provider.Entry) []githubTask {
 	return tasks
 }
 
-// classifyGitHubTasksByExistence は exists 関数を使って各タスクを新規/更新に分類する純粋関数。
-// exists(task) → (存在するか, エラー)
+// classifyGitHubTasksByExistence はテスト容易性のため存在確認関数 exists を注入して
+// 各タスクを新規/更新に分類する。exists(task) → (存在するか, エラー)
 func classifyGitHubTasksByExistence(tasks []githubTask, exists func(t githubTask) (bool, error)) ([]githubClassifiedTask, error) {
 	result := make([]githubClassifiedTask, len(tasks))
 	for i, t := range tasks {
@@ -126,7 +130,8 @@ func (g *githubProvider) Sync(opts provider.Options, entries []provider.Entry) e
 	tasks := expandGitHubTasks(entries)
 
 	// ---- 既存確認して新規/更新を分類 ----
-	client := &http.Client{}
+	// ネットワーク不調時に無期限ブロックしないようタイムアウトを設定する。
+	client := &http.Client{Timeout: httpTimeout}
 	var classified []githubClassifiedTask
 	if token != "" {
 		cls, err := classifyGitHubTasks(client, token, owner, repo, tasks)
@@ -207,7 +212,7 @@ func (g *githubProvider) Sync(opts provider.Options, entries []provider.Entry) e
 	}
 	keyCache := map[string]cachedKeyEntry{}
 
-	for _, t := range tasks {
+	for i, t := range tasks {
 		var sendErr error
 		if t.entry.Secret {
 			// 公開鍵を取得（envScope ごとにキャッシュ）
@@ -231,16 +236,24 @@ func (g *githubProvider) Sync(opts provider.Options, entries []provider.Entry) e
 			}
 			sendErr = githubPutSecret(client, token, owner, repo, t.envScope, t.entry.Key, encrypted, cached.keyID)
 		} else {
-			// variable: GET で存在確認 → POST or PATCH
-			exists, e := githubVariableExists(client, token, owner, repo, t.envScope, t.entry.Key)
-			if e != nil {
-				scope := t.envScope
-				if scope == "" {
-					scope = "repo"
+			// variable: 既存判定で POST(新規) or PATCH(更新) を分岐。
+			// 分類フェーズで取得済みなら classified を再利用し、存在確認 API の二重呼び出しを避ける。
+			// classified==nil（分類スキップ）のときだけ存在確認 API にフォールバックする。
+			var exists bool
+			if classified != nil {
+				exists = !classified[i].isNew
+			} else {
+				var e error
+				exists, e = githubVariableExists(client, token, owner, repo, t.envScope, t.entry.Key)
+				if e != nil {
+					scope := t.envScope
+					if scope == "" {
+						scope = "repo"
+					}
+					fmt.Printf("✗ %s (env: %s) -> 存在確認失敗: %s\n", t.entry.Key, scope, e)
+					ngCount++
+					continue
 				}
-				fmt.Printf("✗ %s (env: %s) -> 存在確認失敗: %s\n", t.entry.Key, scope, e)
-				ngCount++
-				continue
 			}
 			if exists {
 				sendErr = githubUpdateVariable(client, token, owner, repo, t.envScope, t.entry.Key, t.entry.Value)
