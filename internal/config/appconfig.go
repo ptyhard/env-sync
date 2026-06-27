@@ -132,8 +132,11 @@ func mergeAppConfig(global, project AppConfig) AppConfig {
 // expandEnvRefs は s 中の ${VAR} / ${VAR:-default} を環境変数で展開する。
 // ${VAR} で VAR が未設定（空含む）かつデフォルト値がない場合はエラーを返す。
 // ${:-default} のように変数名が空の場合はエラーを返す（タイポ検出）。
-// ${ を含まない文字列はそのまま返す（後方互換）。
+// ${ を含まない文字列はそのまま返す（後方互換・早期リターン）。
 func expandEnvRefs(s string) (string, error) {
+	if !strings.Contains(s, "${") {
+		return s, nil
+	}
 	var unresolved []string
 	result := envRefRe.ReplaceAllStringFunc(s, func(match string) string {
 		inner := match[2 : len(match)-1] // "${" と "}" を除去
@@ -157,7 +160,7 @@ func expandEnvRefs(s string) (string, error) {
 		return match
 	})
 	if len(unresolved) > 0 {
-		return "", fmt.Errorf("config で参照された環境変数が未設定です: %s", strings.Join(unresolved, ", "))
+		return "", fmt.Errorf("config で参照された環境変数が未設定または書式不正です: %s", strings.Join(unresolved, ", "))
 	}
 	return result, nil
 }
