@@ -87,10 +87,12 @@ var (
 // go が埋め込む VCS 情報（go build）やモジュールバージョン（go install module@v）で補う。
 // go build でモジュールバージョンが "(devel)" のときは vcs.revision の先頭 7 文字を使って
 // "dev-<shortsha>" 形式にフォールバックする。
+// version のみ注入されて commit/date が未注入のケースでも ReadBuildInfo() で補えるよう、
+// 3 つすべてが初期値でない場合のみ早期リターンする。
 func versionInfo() (v, c, d string) {
 	v, c, d = version, commit, date
-	if v != "dev" {
-		// ldflags で注入済み。
+	if v != "dev" && c != "none" && d != "unknown" {
+		// ldflags で 3 つとも注入済み。フォールバック不要。
 		return v, c, d
 	}
 
@@ -100,7 +102,8 @@ func versionInfo() (v, c, d string) {
 	}
 
 	// go install module@v1.2.3 ではモジュールバージョンが入る（go build では "(devel)"）。
-	if bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+	// v が "dev"（未注入）の場合のみ上書きし、ldflags 注入済みの値は保持する。
+	if v == "dev" && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
 		v = bi.Main.Version
 	}
 
