@@ -82,7 +82,9 @@ var (
 	date    = "unknown"
 )
 
-// versionInfo は表示用のバージョン・コミット・ビルド日時を返す。
+// versionInfo は表示用のバージョン・コミット・日時を返す。
+// 返す日時は ldflags の date（ビルド日時）、またはフォールバック時は
+// runtime/debug の vcs.time（コミット時刻）であり、厳密にはビルド日時とは異なる場合がある。
 // ldflags で値が注入されていればそれを優先し、無い場合は
 // go が埋め込む VCS 情報（go build）やモジュールバージョン（go install module@v）で補う。
 // go build でモジュールバージョンが "(devel)" のときは vcs.revision の先頭 7 文字を使って
