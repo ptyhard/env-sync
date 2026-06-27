@@ -59,6 +59,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime/debug"
 
 	"gopkg.in/yaml.v3"
 
@@ -72,11 +73,76 @@ import (
 )
 
 // ldflags で注入するバージョン情報。
+// goreleaser のリリースビルドでは ldflags で上書きされる。
+// ローカルの go build / go install では初期値のままになるため、
+// versionInfo() が runtime/debug のビルド情報をフォールバックとして補う。
 var (
 	version = "dev"
 	commit  = "none"
 	date    = "unknown"
 )
+
+// versionInfo は表示用のバージョン・コミット・日時を返す。
+// 返す日時は ldflags の date（ビルド日時）、またはフォールバック時は
+// runtime/debug の vcs.time（コミット時刻）であり、厳密にはビルド日時とは異なる場合がある。
+// ldflags で値が注入されていればそれを優先し、無い場合は
+// go が埋め込む VCS 情報（go build）やモジュールバージョン（go install module@v）で補う。
+// go build でモジュールバージョンが "(devel)" のときは vcs.revision の先頭 7 文字を使って
+// "dev-<shortsha>" 形式にフォールバックする。
+// version のみ注入されて commit/date が未注入のケースでも ReadBuildInfo() で補えるよう、
+// 3 つすべてが初期値でない場合のみ早期リターンする。
+func versionInfo() (v, c, d string) {
+	v, c, d = version, commit, date
+	if v != "dev" && c != "none" && d != "unknown" {
+		// ldflags で 3 つとも注入済み。フォールバック不要。
+		return v, c, d
+	}
+
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return v, c, d
+	}
+
+	// go install module@v1.2.3 ではモジュールバージョンが入る（go build では "(devel)"）。
+	// v が "dev"（未注入）の場合のみ上書きし、ldflags 注入済みの値は保持する。
+	if v == "dev" && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		v = bi.Main.Version
+	}
+
+	var revision string
+	var modified bool
+	for _, s := range bi.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			revision = s.Value
+			if c == "none" {
+				c = s.Value
+			}
+		case "vcs.time":
+			if d == "unknown" {
+				d = s.Value
+			}
+		case "vcs.modified":
+			modified = s.Value == "true"
+		}
+	}
+	if modified && c != "none" {
+		c += "-dirty"
+	}
+	// go build では bi.Main.Version が "(devel)" のため v が "dev" のままになる。
+	// vcs.revision が得られた場合は "dev-<shortsha>" 形式でバージョンを補う。
+	if v == "dev" && revision != "" {
+		short := revision
+		if len(short) > 7 {
+			short = short[:7]
+		}
+		v = "dev-" + short
+		if modified {
+			v += "-dirty"
+		}
+	}
+	return v, c, d
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -97,7 +163,8 @@ func run() error {
 	}
 
 	printVersion := func() {
-		fmt.Printf("env-sync version %s (commit: %s, built: %s)\n", version, commit, date)
+		v, c, d := versionInfo()
+		fmt.Printf("env-sync version %s (commit: %s, built: %s)\n", v, c, d)
 	}
 	opts := config.ParseFlags(args, printUsage, printVersion)
 

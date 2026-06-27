@@ -20,9 +20,9 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X github.com/ptyhard/env-sync/cmd/env-sync.version={{.Version}}
-      - -X github.com/ptyhard/env-sync/cmd/env-sync.commit={{.Commit}}
-      - -X github.com/ptyhard/env-sync/cmd/env-sync.date={{.Date}}
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
 
 archives:
   - id: default
