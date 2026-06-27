@@ -12,12 +12,18 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/ptyhard/env-sync/internal/config"
 	"github.com/ptyhard/env-sync/internal/provider"
 )
 
-const apiBase = "https://api.vercel.com"
+// apiBase は Vercel REST API のベース URL。テストで httptest.Server を
+// 指す差し替えができるよう var にしている。
+var apiBase = "https://api.vercel.com"
+
+// httpTimeout は Vercel API 呼び出しの HTTP タイムアウト。
+const httpTimeout = 30 * time.Second
 
 func init() {
 	provider.RegisterProvider("vercel", func() provider.Provider { return &vercelProvider{} })
@@ -67,16 +73,44 @@ func (v *vercelProvider) Sync(opts provider.Options, entries []provider.Entry) e
 		return err
 	}
 
+	// ---- 既存 key を問い合わせて新規/更新を分類 ----
+	// ネットワーク不調時に無期限ハングしないようタイムアウトを設定する。
+	client := &http.Client{Timeout: httpTimeout}
+	var classified []classifiedVercelItem
+	if token != "" {
+		existing, err := vercelFetchExistingKeys(client, token, projectID, teamID)
+		if err == nil {
+			classified = classifyVercelItems(items, existing)
+		} else {
+			// API 失敗時は classified = nil のまま（確認スキップしない安全側フォールバック）。
+			// 黙って分類をスキップすると新規/更新表示が出ない理由が分からないため警告を出す。
+			fmt.Fprintf(os.Stderr, "警告: 既存 key の取得に失敗したため新規/更新の分類をスキップします: %s\n", err)
+		}
+	}
+
 	// ---- 登録対象を一覧表示 ----
 	fmt.Printf("対象プロジェクト: %s  (env: %s, def: %s)\n", projectID, opts.Env, opts.Def)
-	fmt.Printf("登録対象 %d 件 (既存は upsert で上書き):\n", len(items))
-	for _, it := range items {
+	newCount, updateCount := countClassified(classified, len(items))
+	if classified != nil {
+		fmt.Printf("登録対象 %d 件 (新規 %d 件 / 更新 %d 件):\n", len(items), newCount, updateCount)
+	} else {
+		fmt.Printf("登録対象 %d 件 (既存は upsert で上書き):\n", len(items))
+	}
+	for i, it := range items {
 		tj, _ := json.Marshal(it.Target)
 		secretLabel := "secret=true"
 		if it.Type == "plain" {
 			secretLabel = "secret=false"
 		}
-		fmt.Printf("  %s (%s) environments=%s\n", it.Key, secretLabel, string(tj))
+		if classified != nil {
+			marker, label := "⟳", "更新"
+			if classified[i].isNew {
+				marker, label = "+", "新規"
+			}
+			fmt.Printf("  %s %-30s (%s) environments=%s [%s]\n", marker, it.Key, secretLabel, string(tj), label)
+		} else {
+			fmt.Printf("  %s (%s) environments=%s\n", it.Key, secretLabel, string(tj))
+		}
 	}
 	fmt.Println()
 
@@ -89,12 +123,17 @@ func (v *vercelProvider) Sync(opts provider.Options, entries []provider.Entry) e
 		return nil
 	}
 
-	// ---- 確認 ----
-	if !opts.Yes {
+	// ---- 確認（更新がある場合、または分類不可の場合） ----
+	needsConfirm := classified == nil || updateCount > 0
+	if needsConfirm && !opts.Yes {
 		if !config.IsTTY(os.Stdin) {
 			return fmt.Errorf("対話できない環境です。確認をスキップするには --yes を付けてください")
 		}
-		fmt.Print("上記を Vercel に登録します（既存は上書き）。続行しますか? (y/N) ")
+		if classified != nil && updateCount > 0 {
+			fmt.Printf("上記に更新(上書き) %d 件が含まれます。Vercel に登録します。続行しますか? (y/N) ", updateCount)
+		} else {
+			fmt.Print("上記を Vercel に登録します（既存は上書き）。続行しますか? (y/N) ")
+		}
 		reader := bufio.NewReader(os.Stdin)
 		line, _ := reader.ReadString('\n')
 		ans := strings.ToLower(strings.TrimSpace(line))
@@ -116,7 +155,6 @@ func (v *vercelProvider) Sync(opts provider.Options, entries []provider.Entry) e
 	}
 	u.RawQuery = q.Encode()
 
-	client := &http.Client{}
 	ok, ng := 0, 0
 	for _, it := range items {
 		body, _ := json.Marshal(it)
@@ -155,6 +193,85 @@ func (v *vercelProvider) Sync(opts provider.Options, entries []provider.Entry) e
 		os.Exit(1)
 	}
 	return nil
+}
+
+// classifiedVercelItem は item に新規/更新の分類情報を付加した型。
+type classifiedVercelItem struct {
+	it    item
+	isNew bool // true=新規, false=更新
+}
+
+// vercelFetchExistingKeys は Vercel プロジェクトに登録済みの key 名セットを返す。
+func vercelFetchExistingKeys(client *http.Client, token, projectID, teamID string) (map[string]bool, error) {
+	u, err := url.Parse(fmt.Sprintf("%s/v10/projects/%s/env", apiBase, projectID))
+	if err != nil {
+		return nil, fmt.Errorf("URL 組み立て失敗: %w", err)
+	}
+	q := u.Query()
+	if teamID != "" {
+		q.Set("teamId", teamID)
+	}
+	u.RawQuery = q.Encode()
+
+	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("リクエスト生成失敗: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	res, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("既存 key 取得失敗: %w", err)
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		msg := fmt.Sprintf("HTTP %d", res.StatusCode)
+		if detail := parseErrorBody(res.Body); detail != "" {
+			msg += ": " + detail
+		}
+		return nil, fmt.Errorf("既存 key 取得失敗: %s", msg)
+	}
+
+	var resp struct {
+		Envs []struct {
+			Key string `json:"key"`
+		} `json:"envs"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
+		return nil, fmt.Errorf("既存 key レスポンスのパース失敗: %w", err)
+	}
+
+	existing := make(map[string]bool, len(resp.Envs))
+	for _, e := range resp.Envs {
+		existing[e.Key] = true
+	}
+	return existing, nil
+}
+
+// classifyVercelItems は items を既存 key セットと照合して新規/更新に分類する純粋関数。
+func classifyVercelItems(items []item, existingKeys map[string]bool) []classifiedVercelItem {
+	result := make([]classifiedVercelItem, len(items))
+	for i, it := range items {
+		result[i] = classifiedVercelItem{it: it, isNew: !existingKeys[it.Key]}
+	}
+	return result
+}
+
+// countClassified は classified から新規件数・更新件数を返す。
+// classified が nil（分類不可）のときは新規=total、更新=0 を返す。
+func countClassified(classified []classifiedVercelItem, total int) (newCount, updateCount int) {
+	if classified == nil {
+		return total, 0
+	}
+	for _, c := range classified {
+		if c.isNew {
+			newCount++
+		} else {
+			updateCount++
+		}
+	}
+	return
 }
 
 // entriesToVercelItems は Entry スライスを Vercel API 用の item スライスに変換する純粋関数。

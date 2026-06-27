@@ -52,14 +52,13 @@
 //	--provider <name>         同期先（デフォルト vercel）
 //	--env  <file>             値を読む env ファイル（デフォルト .env）
 //	--def  <file>             定義 YAML（デフォルト env-sync.yaml）
-//	--dry-run                 実際には送信せず、登録予定の key/secret/environments/providers だけ表示（値は出さない）
-//	--yes, -y                 送信前の確認をスキップ
+//	--dry-run                 実際には送信せず、新規/更新の区別を含む登録予定一覧を表示（値は出さない）
+//	--yes, -y                 更新(上書き)を含む場合の確認をスキップして送信
 package main
 
 import (
 	"fmt"
 	"os"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -156,29 +155,6 @@ func run() error {
 		}
 	}
 
-	// ---- dry-run: 統合一覧表示して終了 ----
-	if opts.DryRun {
-		if len(entries) == 0 {
-			fmt.Println("登録対象がありません")
-		} else {
-			fmt.Printf("同期対象 %d 件:\n", len(entries))
-			for _, e := range entries {
-				secretStr := "secret=true"
-				if !e.Secret {
-					secretStr = "secret=false"
-				}
-				envsStr := strings.Join(e.Environments, ", ")
-				if envsStr == "" {
-					envsStr = "(デフォルト)"
-				}
-				fmt.Printf("  %-30s  %s  environments=[%s]  providers=[%s]\n",
-					e.Key, secretStr, envsStr, strings.Join(e.Providers, ", "))
-			}
-		}
-		fmt.Println("\n[dry-run] 送信しません")
-		return nil
-	}
-
 	// entries が 0 件なら同期対象なしを明示して終了
 	if len(entries) == 0 {
 		fmt.Println("登録対象がありません")
@@ -186,6 +162,7 @@ func run() error {
 	}
 
 	// ---- プロバイダーへ同期（登録順） ----
+	// dry-run 時も各 provider が新規/更新を分類して一覧表示した上で終了する
 	for _, pname := range provider.RegisteredProviderNames() {
 		ents, ok := providerEntries[pname]
 		if !ok {
@@ -214,10 +191,15 @@ func printUsage() {
   --provider <name>         同期先（デフォルト vercel）
   --env <file>              値を読む env ファイル（デフォルト .env）
   --def <file>              定義 YAML（デフォルト env-sync.yaml）
-  --dry-run                 送信せず登録予定の key/secret/environments/providers を表示
-  --yes, -y                 送信前の確認をスキップ
+  --dry-run                 送信せず新規/更新の区別を含む登録予定一覧を表示（値は出さない）
+  --yes, -y                 更新(上書き)を含む場合の確認をスキップして送信
   --version                 バージョン情報を表示して終了
   -h, --help                このヘルプを表示
+
+確認動作:
+  送信前に provider へ問い合わせ、既存 key を「⟳ KEY [更新]」、未登録 key を「+ KEY [新規]」として表示する。
+  更新(上書き)対象がある場合のみ確認プロンプトが出る。新規のみなら確認なしで送信する。
+  非対話環境(TTY なし)で更新対象があり --yes/-y がない場合はエラーで停止し --yes を案内する。
 
 オプション（init）:
   --env <file>   読み込む env ファイル（デフォルト .env）

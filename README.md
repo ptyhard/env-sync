@@ -163,17 +163,20 @@ vercel link
 ## 使い方
 
 ```bash
-# dry-run（送信せず key / secret / environments だけ確認。値は表示されない）
-VERCEL_PROJECT_ID=dummy ./env-sync --env .env.production --dry-run
+# dry-run（送信せず新規/更新の区別を含む登録予定一覧を表示。値は表示されない）
+VERCEL_TOKEN=xxxxx VERCEL_PROJECT_ID=xxx ./env-sync --env .env.production --dry-run
 
-# 本番投入（登録対象を一覧表示し、y/N の確認のうえ送信する）
+# 本番投入（新規/更新を分類して表示。更新がある場合のみ y/N 確認）
 VERCEL_TOKEN=xxxxx ./env-sync --env .env.production
 
-# 確認をスキップ（CI など）
+# 更新(上書き)確認をスキップ（CI など）
 VERCEL_TOKEN=xxxxx ./env-sync --env .env.production --yes
 ```
 
-送信前に登録対象（key / secret / environments）を一覧表示し、既存変数は upsert で上書きされるため `y/N` の確認を取る。`--yes`（`-y`）で確認をスキップできる。非対話環境で `--yes` を付けないと安全のため中止する。
+送信前に provider へ問い合わせ、各キーを「`+ KEY [新規]`」または「`⟳ KEY [更新]`」として表示する。
+**更新（上書き）対象がある場合のみ** `y/N` の確認プロンプトが表示される。新規登録のみなら確認なしで送信する。
+`--yes`（`-y`）を付けると確認をスキップして送信できる。非対話環境（TTY なし）で更新対象があり `--yes` がない場合はエラーで停止し `--yes` を案内する。
+`--dry-run` 時もトークンが設定されていれば新規/更新の分類を表示する（送信はしない）。
 
 ## オプション / 環境変数
 
@@ -182,8 +185,8 @@ VERCEL_TOKEN=xxxxx ./env-sync --env .env.production --yes
 | `--provider <name>` | – | 同期先（デフォルト `vercel`）。現在 `vercel` / `github` が利用可 |
 | `--env <file>` | – | 値を読む env ファイル（デフォルト `.env`） |
 | `--def <file>` | – | 定義 YAML（デフォルト `env-sync.yaml`） |
-| `--dry-run` | – | 送信せず登録予定のみ表示 |
-| `--yes` / `-y` | – | 送信前の確認をスキップ |
+| `--dry-run` | – | 送信せず新規/更新の区別を含む登録予定一覧を表示 |
+| `--yes` / `-y` | – | 更新(上書き)がある場合の確認をスキップ |
 | `--force` | – | `init` 時に既存の def ファイルを上書きする |
 | `VERCEL_TOKEN` | ◯(Vercel) | Vercel アクセストークン（dry-run 時は不要） |
 | `VERCEL_PROJECT_ID` | △(Vercel) | プロジェクト ID。未指定なら config ファイルまたは `.vercel/project.json` から自動取得 |
@@ -263,17 +266,17 @@ EOF
 `--provider github` を指定すると GitHub Actions の Secrets/Variables に同期します。
 
 ```bash
-# dry-run（送信せず key / secret / environments だけ確認。値は表示されない）
-GITHUB_REPO=owner/repo ./env-sync --provider github --env .env.production --dry-run
+# dry-run（送信せず新規/更新の区別を含む登録予定一覧を表示。値は表示されない）
+GITHUB_TOKEN=xxxxx GITHUB_REPO=owner/repo ./env-sync --provider github --env .env.production --dry-run
 
-# 本番投入（リポジトリレベル）
+# 本番投入（リポジトリレベル。更新がある場合のみ確認プロンプトが表示される）
 GITHUB_TOKEN=xxxxx GITHUB_REPO=owner/repo ./env-sync --provider github --env .env.production
 
 # named environment に登録（env-sync.yaml の environments フィールドで指定）
 # environments: [production] を yaml に書けばその environment に登録される
 GITHUB_TOKEN=xxxxx ./env-sync --provider github --env .env.production
 
-# 確認をスキップ（CI など）
+# 更新(上書き)確認をスキップ（CI など）
 GITHUB_TOKEN=xxxxx ./env-sync --provider github --yes --env .env.production
 ```
 
