@@ -36,17 +36,19 @@ func (p *ProviderVal) UnmarshalYAML(value *yaml.Node) error {
 
 // VarConf は定義 YAML の variables 配下 1 件分の設定。
 type VarConf struct {
-	Secret       *bool        `yaml:"secret"`
-	Environments []string     `yaml:"environments"`
-	Provider     *ProviderVal `yaml:"provider"`
+	Secret        *bool        `yaml:"secret"`
+	Environments  []string     `yaml:"environments"`
+	Provider      *ProviderVal `yaml:"provider"`
+	VercelProject *ProviderVal `yaml:"vercel_project"`
 }
 
 // Definition は定義 YAML 全体の構造。
 type Definition struct {
 	Defaults struct {
-		Secret       *bool        `yaml:"secret"`
-		Environments []string     `yaml:"environments"`
-		Provider     *ProviderVal `yaml:"provider"`
+		Secret        *bool        `yaml:"secret"`
+		Environments  []string     `yaml:"environments"`
+		Provider      *ProviderVal `yaml:"provider"`
+		VercelProject *ProviderVal `yaml:"vercel_project"`
 	} `yaml:"defaults"`
 	Variables map[string]VarConf `yaml:"variables"`
 }

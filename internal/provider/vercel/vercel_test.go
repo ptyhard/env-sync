@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/ptyhard/env-sync/internal/config"
 	"github.com/ptyhard/env-sync/internal/provider"
 )
 
@@ -406,5 +407,130 @@ func TestClassifyVercelItems_NewAndUpdate(t *testing.T) {
 	}
 	if classified[1].isNew {
 		t.Error("classified[1].isNew = true, want false (EXISTING_KEY は更新)")
+	}
+}
+
+// --- filterEntriesByVercelProject のテスト ---
+
+func TestFilterEntriesByVercelProject_NoFilter(t *testing.T) {
+	entries := []provider.Entry{
+		{Key: "FOO", VercelProjects: nil},
+		{Key: "BAR", VercelProjects: []string{}},
+	}
+	got := filterEntriesByVercelProject(entries, "app-a")
+	if len(got) != 2 {
+		t.Errorf("len = %d, want 2 (VercelProjects 未指定は全ターゲット向け)", len(got))
+	}
+}
+
+func TestFilterEntriesByVercelProject_MatchSingle(t *testing.T) {
+	entries := []provider.Entry{
+		{Key: "API_URL", VercelProjects: []string{"app-a"}},
+		{Key: "DB_URL", VercelProjects: []string{"app-b"}},
+		{Key: "SHARED", VercelProjects: nil},
+	}
+	got := filterEntriesByVercelProject(entries, "app-a")
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2 (app-a + SHARED)", len(got))
+	}
+	keys := make([]string, len(got))
+	for i, e := range got {
+		keys[i] = e.Key
+	}
+	for _, want := range []string{"API_URL", "SHARED"} {
+		found := false
+		for _, k := range keys {
+			if k == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("キー %q が結果に含まれていない: %v", want, keys)
+		}
+	}
+}
+
+func TestFilterEntriesByVercelProject_MatchMultiple(t *testing.T) {
+	entries := []provider.Entry{
+		{Key: "SHARED_KEY", VercelProjects: []string{"app-a", "app-b"}},
+	}
+	gotA := filterEntriesByVercelProject(entries, "app-a")
+	gotB := filterEntriesByVercelProject(entries, "app-b")
+	gotC := filterEntriesByVercelProject(entries, "app-c")
+	if len(gotA) != 1 {
+		t.Errorf("app-a: len = %d, want 1", len(gotA))
+	}
+	if len(gotB) != 1 {
+		t.Errorf("app-b: len = %d, want 1", len(gotB))
+	}
+	if len(gotC) != 0 {
+		t.Errorf("app-c: len = %d, want 0 (app-c は指定されていない)", len(gotC))
+	}
+}
+
+// --- validateEntryVercelProjects のテスト ---
+
+func TestValidateEntryVercelProjects_NoProjects_NoVercelProject(t *testing.T) {
+	entries := []provider.Entry{
+		{Key: "FOO", VercelProjects: nil},
+	}
+	if err := validateEntryVercelProjects(entries, nil); err != nil {
+		t.Errorf("エラーなしを期待: %v", err)
+	}
+}
+
+func TestValidateEntryVercelProjects_NoProjects_WithVercelProject(t *testing.T) {
+	entries := []provider.Entry{
+		{Key: "FOO", VercelProjects: []string{"app-a"}},
+	}
+	err := validateEntryVercelProjects(entries, nil)
+	if err == nil {
+		t.Error("エラーを期待（単一解決モードで vercel_project を指定）")
+	}
+	if !strings.Contains(err.Error(), "vercel.projects") {
+		t.Errorf("エラーメッセージに 'vercel.projects' が含まれない: %v", err)
+	}
+}
+
+func TestValidateEntryVercelProjects_ValidProject(t *testing.T) {
+	projects := []config.VercelProjectConf{
+		{Name: "app-a", ProjectID: "pid-a"},
+		{Name: "app-b", ProjectID: "pid-b"},
+	}
+	entries := []provider.Entry{
+		{Key: "API_URL", VercelProjects: []string{"app-a"}},
+		{Key: "DB_URL", VercelProjects: []string{"app-a", "app-b"}},
+	}
+	if err := validateEntryVercelProjects(entries, projects); err != nil {
+		t.Errorf("エラーなしを期待: %v", err)
+	}
+}
+
+func TestValidateEntryVercelProjects_InvalidProject(t *testing.T) {
+	projects := []config.VercelProjectConf{
+		{Name: "app-a", ProjectID: "pid-a"},
+	}
+	entries := []provider.Entry{
+		{Key: "FOO", VercelProjects: []string{"app-x"}},
+	}
+	err := validateEntryVercelProjects(entries, projects)
+	if err == nil {
+		t.Error("エラーを期待（存在しないプロジェクト名）")
+	}
+	if !strings.Contains(err.Error(), "app-x") {
+		t.Errorf("エラーメッセージに 'app-x' が含まれない: %v", err)
+	}
+}
+
+func TestValidateEntryVercelProjects_NoVercelProject_WithProjects(t *testing.T) {
+	projects := []config.VercelProjectConf{
+		{Name: "app-a", ProjectID: "pid-a"},
+	}
+	entries := []provider.Entry{
+		{Key: "FOO", VercelProjects: nil},
+	}
+	if err := validateEntryVercelProjects(entries, projects); err != nil {
+		t.Errorf("エラーなしを期待（vercel_project 未指定は全ターゲット向け）: %v", err)
 	}
 }

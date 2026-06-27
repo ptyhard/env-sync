@@ -94,12 +94,22 @@ func ResolveEntries(def config.Definition, envVars map[string]string, defKeys []
 			}
 		}
 
+		// vercel_project の解決: varConf.VercelProject → defaults.VercelProject
+		var vercelProjects []string
+		if def.Defaults.VercelProject != nil {
+			vercelProjects = def.Defaults.VercelProject.Values
+		}
+		if conf.VercelProject != nil {
+			vercelProjects = conf.VercelProject.Values
+		}
+
 		entries = append(entries, provider.Entry{
-			Key:          key,
-			Value:        val,
-			Secret:       secret,
-			Environments: envs,
-			Providers:    providers,
+			Key:            key,
+			Value:          val,
+			Secret:         secret,
+			Environments:   envs,
+			Providers:      providers,
+			VercelProjects: vercelProjects,
 		})
 	}
 	return entries, nil
