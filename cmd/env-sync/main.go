@@ -59,6 +59,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime/debug"
 
 	"gopkg.in/yaml.v3"
 
@@ -72,11 +73,55 @@ import (
 )
 
 // ldflags で注入するバージョン情報。
+// goreleaser のリリースビルドでは ldflags で上書きされる。
+// ローカルの go build / go install では初期値のままになるため、
+// versionInfo() が runtime/debug のビルド情報をフォールバックとして補う。
 var (
 	version = "dev"
 	commit  = "none"
 	date    = "unknown"
 )
+
+// versionInfo は表示用のバージョン・コミット・ビルド日時を返す。
+// ldflags で値が注入されていればそれを優先し、無い場合は
+// go が埋め込む VCS 情報（go build）やモジュールバージョン（go install module@v）で補う。
+func versionInfo() (v, c, d string) {
+	v, c, d = version, commit, date
+	if v != "dev" {
+		// ldflags で注入済み。
+		return v, c, d
+	}
+
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return v, c, d
+	}
+
+	// go install module@v1.2.3 ではモジュールバージョンが入る（go build では "(devel)"）。
+	if bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		v = bi.Main.Version
+	}
+
+	var modified bool
+	for _, s := range bi.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			if c == "none" {
+				c = s.Value
+			}
+		case "vcs.time":
+			if d == "unknown" {
+				d = s.Value
+			}
+		case "vcs.modified":
+			modified = s.Value == "true"
+		}
+	}
+	if modified && c != "none" {
+		c += "-dirty"
+	}
+	return v, c, d
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -97,7 +142,8 @@ func run() error {
 	}
 
 	printVersion := func() {
-		fmt.Printf("env-sync version %s (commit: %s, built: %s)\n", version, commit, date)
+		v, c, d := versionInfo()
+		fmt.Printf("env-sync version %s (commit: %s, built: %s)\n", v, c, d)
 	}
 	opts := config.ParseFlags(args, printUsage, printVersion)
 
