@@ -85,6 +85,8 @@ var (
 // versionInfo は表示用のバージョン・コミット・ビルド日時を返す。
 // ldflags で値が注入されていればそれを優先し、無い場合は
 // go が埋め込む VCS 情報（go build）やモジュールバージョン（go install module@v）で補う。
+// go build でモジュールバージョンが "(devel)" のときは vcs.revision の先頭 7 文字を使って
+// "dev-<shortsha>" 形式にフォールバックする。
 func versionInfo() (v, c, d string) {
 	v, c, d = version, commit, date
 	if v != "dev" {
@@ -102,10 +104,12 @@ func versionInfo() (v, c, d string) {
 		v = bi.Main.Version
 	}
 
+	var revision string
 	var modified bool
 	for _, s := range bi.Settings {
 		switch s.Key {
 		case "vcs.revision":
+			revision = s.Value
 			if c == "none" {
 				c = s.Value
 			}
@@ -119,6 +123,18 @@ func versionInfo() (v, c, d string) {
 	}
 	if modified && c != "none" {
 		c += "-dirty"
+	}
+	// go build では bi.Main.Version が "(devel)" のため v が "dev" のままになる。
+	// vcs.revision が得られた場合は "dev-<shortsha>" 形式でバージョンを補う。
+	if v == "dev" && revision != "" {
+		short := revision
+		if len(short) > 7 {
+			short = short[:7]
+		}
+		v = "dev-" + short
+		if modified {
+			v += "-dirty"
+		}
 	}
 	return v, c, d
 }

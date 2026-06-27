@@ -50,10 +50,21 @@ func TestVersionFlag_LdflagsInjected(t *testing.T) {
 
 // ldflags 無しのビルドでも runtime/debug のフォールバックで
 // 初期値の "dev" のままにならない（VCS 情報で補われる）ことを検証する。
+// VCS 情報が埋め込まれない環境（.git が無い、-buildvcs=false 等）ではスキップする。
 func TestVersionFlag_DebugFallback(t *testing.T) {
 	bin := t.TempDir() + "/env-sync-test"
 	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
 		t.Fatalf("ビルド失敗: %s\n%s", err, out)
+	}
+
+	// go version -m でバイナリに vcs.revision が埋め込まれているか確認する。
+	// 埋め込まれていない環境（CI の checkout 状況や -buildvcs=false 等）ではスキップ。
+	verOut, err := exec.Command("go", "version", "-m", bin).Output()
+	if err != nil {
+		t.Skipf("go version -m の実行に失敗したためスキップ: %s", err)
+	}
+	if !strings.Contains(string(verOut), "vcs.revision") {
+		t.Skip("バイナリに vcs.revision が埋め込まれていないためスキップ（.git 無し / -buildvcs=false 等）")
 	}
 
 	out, err := exec.Command(bin, "--version").Output()
