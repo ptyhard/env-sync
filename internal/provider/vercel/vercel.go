@@ -17,7 +17,9 @@ import (
 	"github.com/ptyhard/env-sync/internal/provider"
 )
 
-const apiBase = "https://api.vercel.com"
+// apiBase は Vercel REST API のベース URL。テストで httptest.Server を
+// 指す差し替えができるよう var にしている。
+var apiBase = "https://api.vercel.com"
 
 func init() {
 	provider.RegisterProvider("vercel", func() provider.Provider { return &vercelProvider{} })
@@ -70,8 +72,11 @@ func (v *vercelProvider) Sync(opts provider.Options, entries []provider.Entry) e
 		existing, err := vercelFetchExistingKeys(client, token, projectID, teamID)
 		if err == nil {
 			classified = classifyVercelItems(items, existing)
+		} else {
+			// API 失敗時は classified = nil のまま（確認スキップしない安全側フォールバック）。
+			// 黙って分類をスキップすると新規/更新表示が出ない理由が分からないため警告を出す。
+			fmt.Fprintf(os.Stderr, "警告: 既存 key の取得に失敗したため新規/更新の分類をスキップします: %s\n", err)
 		}
-		// API 失敗時は classified = nil のまま（確認スキップしない安全側フォールバック）
 	}
 
 	// ---- 登録対象を一覧表示 ----

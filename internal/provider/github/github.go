@@ -71,7 +71,11 @@ func classifyGitHubTasksByExistence(tasks []githubTask, exists func(t githubTask
 	for i, t := range tasks {
 		found, err := exists(t)
 		if err != nil {
-			return nil, fmt.Errorf("%s: 存在確認失敗: %w", t.entry.Key, err)
+			scope := t.envScope
+			if scope == "" {
+				scope = "repo"
+			}
+			return nil, fmt.Errorf("%s (env: %s): 存在確認失敗: %w", t.entry.Key, scope, err)
 		}
 		result[i] = githubClassifiedTask{task: t, isNew: !found}
 	}
@@ -128,8 +132,11 @@ func (g *githubProvider) Sync(opts provider.Options, entries []provider.Entry) e
 		cls, err := classifyGitHubTasks(client, token, owner, repo, tasks)
 		if err == nil {
 			classified = cls
+		} else {
+			// API 失敗時は classified = nil のまま（安全側フォールバック）。
+			// トークン権限不足やレート制限などの原因が分かるよう警告を出す。
+			fmt.Fprintf(os.Stderr, "警告: 既存の存在確認に失敗したため新規/更新の分類をスキップします: %s\n", err)
 		}
-		// API 失敗時は classified = nil のまま（安全側フォールバック）
 	}
 
 	// ---- 一覧表示 ----
@@ -227,7 +234,11 @@ func (g *githubProvider) Sync(opts provider.Options, entries []provider.Entry) e
 			// variable: GET で存在確認 → POST or PATCH
 			exists, e := githubVariableExists(client, token, owner, repo, t.envScope, t.entry.Key)
 			if e != nil {
-				fmt.Printf("✗ %s -> 存在確認失敗: %s\n", t.entry.Key, e)
+				scope := t.envScope
+				if scope == "" {
+					scope = "repo"
+				}
+				fmt.Printf("✗ %s (env: %s) -> 存在確認失敗: %s\n", t.entry.Key, scope, e)
 				ngCount++
 				continue
 			}

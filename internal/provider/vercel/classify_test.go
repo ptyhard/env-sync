@@ -105,13 +105,12 @@ func TestCountClassified_Mixed(t *testing.T) {
 // --- vercelFetchExistingKeys の統合テスト（httptest） ---
 
 func TestVercelFetchExistingKeys_Success(t *testing.T) {
+	var gotPath, gotQuery, gotMethod, gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			t.Errorf("メソッド = %q, want GET", r.Method)
-		}
-		if auth := r.Header.Get("Authorization"); auth != "Bearer test-token" {
-			t.Errorf("Authorization = %q, want Bearer test-token", auth)
-		}
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		gotAuth = r.Header.Get("Authorization")
 		resp := map[string]interface{}{
 			"envs": []map[string]interface{}{
 				{"key": "FOO", "target": []string{"production"}},
@@ -124,49 +123,76 @@ func TestVercelFetchExistingKeys_Success(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	// apiBase を httptest.Server に差し替えて実際に vercelFetchExistingKeys を呼ぶ。
+	// これにより URL 組み立て・ヘッダー付与・ステータス処理・パースまで関数の契約を検証できる。
 	origBase := apiBase
-	// テスト用に apiBase を差し替える（package レベル変数を経由しないため直接書き換え）
-	// vercel.go の apiBase は const なので httptest URL を直接 projectID に組み込む
-	_ = origBase // suppress unused warning
+	apiBase = srv.URL
+	defer func() { apiBase = origBase }()
 
 	client := &http.Client{}
-	// テスト用 URL を使うため vercelFetchExistingKeys を直接呼ぶには apiBase を差し替える必要がある。
-	// ここでは URL 構築ロジックを検証する別の方法として httptest.Server の URL を projectID に含めた
-	// カスタム URL で呼ぶ（テスト用ヘルパー経由）。
-	_ = client
-
-	// apiBase が const のため URL 組み立てのテストは httptest URL を直接呼ぶ方法で行う
-	u := srv.URL + "/v10/projects/test-project/env"
-	req, _ := http.NewRequest(http.MethodGet, u, nil)
-	req.Header.Set("Authorization", "Bearer test-token")
-	res, err := http.DefaultClient.Do(req)
+	existing, err := vercelFetchExistingKeys(client, "test-token", "test-project", "test-team")
 	if err != nil {
-		t.Fatalf("リクエスト失敗: %v", err)
-	}
-	defer res.Body.Close()
-
-	if res.StatusCode != http.StatusOK {
-		t.Fatalf("ステータス = %d, want 200", res.StatusCode)
+		t.Fatalf("vercelFetchExistingKeys 失敗: %v", err)
 	}
 
-	var resp struct {
-		Envs []struct {
-			Key string `json:"key"`
-		} `json:"envs"`
+	// --- リクエストの組み立てを検証 ---
+	if gotMethod != http.MethodGet {
+		t.Errorf("メソッド = %q, want GET", gotMethod)
 	}
-	if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
-		t.Fatalf("パース失敗: %v", err)
+	if want := "/v10/projects/test-project/env"; gotPath != want {
+		t.Errorf("パス = %q, want %q", gotPath, want)
+	}
+	if want := "teamId=test-team"; gotQuery != want {
+		t.Errorf("クエリ = %q, want %q", gotQuery, want)
+	}
+	if want := "Bearer test-token"; gotAuth != want {
+		t.Errorf("Authorization = %q, want %q", gotAuth, want)
 	}
 
-	existing := make(map[string]bool)
-	for _, e := range resp.Envs {
-		existing[e.Key] = true
-	}
-
+	// --- レスポンスのパース結果を検証 ---
 	if !existing["FOO"] {
 		t.Error("FOO が存在しない")
 	}
 	if !existing["BAR"] {
 		t.Error("BAR が存在しない")
+	}
+	if len(existing) != 2 {
+		t.Errorf("existing 件数 = %d, want 2（重複 key は集約される）", len(existing))
+	}
+}
+
+func TestVercelFetchExistingKeys_NoTeamID(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"envs": []map[string]interface{}{}}) //nolint:errcheck
+	}))
+	defer srv.Close()
+
+	origBase := apiBase
+	apiBase = srv.URL
+	defer func() { apiBase = origBase }()
+
+	if _, err := vercelFetchExistingKeys(&http.Client{}, "test-token", "test-project", ""); err != nil {
+		t.Fatalf("vercelFetchExistingKeys 失敗: %v", err)
+	}
+	if gotQuery != "" {
+		t.Errorf("teamID 空のときクエリは空のはず, got %q", gotQuery)
+	}
+}
+
+func TestVercelFetchExistingKeys_HTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	origBase := apiBase
+	apiBase = srv.URL
+	defer func() { apiBase = origBase }()
+
+	if _, err := vercelFetchExistingKeys(&http.Client{}, "bad-token", "test-project", ""); err == nil {
+		t.Fatal("HTTP 401 のときエラーを返すべき")
 	}
 }
