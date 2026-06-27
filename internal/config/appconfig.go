@@ -7,9 +7,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
+
+// envRefRe は ${VAR} または ${VAR:-default} にマッチする正規表現。
+var envRefRe = regexp.MustCompile(`\$\{([^}]+)\}`)
 
 const projectAppConfigFile = ".env-sync.config.yaml"
 
@@ -51,6 +56,9 @@ func LoadAppConfig() (*AppConfig, error) {
 		return nil, err
 	}
 	merged := mergeAppConfig(global, project)
+	if err := expandAppConfigRefs(&merged); err != nil {
+		return nil, err
+	}
 	return &merged, nil
 }
 
@@ -119,6 +127,61 @@ func mergeAppConfig(global, project AppConfig) AppConfig {
 		merged.GitHub.Repo = project.GitHub.Repo
 	}
 	return merged
+}
+
+// expandEnvRefs は s 中の ${VAR} / ${VAR:-default} を環境変数で展開する。
+// ${VAR} で VAR が未設定（空含む）かつデフォルト値がない場合はエラーを返す。
+// ${:-default} のように変数名が空の場合はエラーを返す（タイポ検出）。
+// ${ を含まない文字列はそのまま返す（後方互換・早期リターン）。
+func expandEnvRefs(s string) (string, error) {
+	if !strings.Contains(s, "${") {
+		return s, nil
+	}
+	var unresolved []string
+	result := envRefRe.ReplaceAllStringFunc(s, func(match string) string {
+		inner := match[2 : len(match)-1] // "${" と "}" を除去
+		if idx := strings.Index(inner, ":-"); idx >= 0 {
+			varName := inner[:idx]
+			if varName == "" {
+				// 変数名が空の場合はタイポとして unresolved 扱い
+				unresolved = append(unresolved, "(空の変数名)")
+				return match
+			}
+			defaultVal := inner[idx+2:]
+			if v := os.Getenv(varName); v != "" {
+				return v
+			}
+			return defaultVal
+		}
+		if v := os.Getenv(inner); v != "" {
+			return v
+		}
+		unresolved = append(unresolved, inner)
+		return match
+	})
+	if len(unresolved) > 0 {
+		return "", fmt.Errorf("config で参照された環境変数が未設定または書式不正です: %s", strings.Join(unresolved, ", "))
+	}
+	return result, nil
+}
+
+// expandAppConfigRefs は AppConfig の全文字列フィールドに環境変数展開を適用する。
+func expandAppConfigRefs(cfg *AppConfig) error {
+	fields := []*string{
+		&cfg.Vercel.Token,
+		&cfg.Vercel.ProjectID,
+		&cfg.Vercel.TeamID,
+		&cfg.GitHub.Token,
+		&cfg.GitHub.Repo,
+	}
+	for _, f := range fields {
+		expanded, err := expandEnvRefs(*f)
+		if err != nil {
+			return err
+		}
+		*f = expanded
+	}
+	return nil
 }
 
 // warnIfInsecurePermissions は global config がパーミッション 0600 でない場合に stderr へ警告する。

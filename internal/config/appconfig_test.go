@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ptyhard/env-sync/internal/config"
@@ -217,6 +218,161 @@ func TestResolveGitHubRepo_FallsBackToConfig(t *testing.T) {
 	}
 }
 
+// --- 環境変数参照展開テスト ---
+
+func TestLoadAppConfig_EnvRefExpansion_Basic(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "no-global"))
+	chdirCleanup(t, dir)
+	t.Setenv("MY_TOKEN", "abc123")
+	if err := os.WriteFile(filepath.Join(dir, ".env-sync.config.yaml"), []byte(`
+vercel:
+  token: ${MY_TOKEN}
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadAppConfig()
+	if err != nil {
+		t.Fatalf("エラーなしを期待: %v", err)
+	}
+	if cfg.Vercel.Token != "abc123" {
+		t.Errorf("Vercel.Token = %q, want abc123", cfg.Vercel.Token)
+	}
+}
+
+func TestLoadAppConfig_EnvRefExpansion_Default(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "no-global"))
+	chdirCleanup(t, dir)
+	t.Setenv("UNDEFINED_VAR", "")
+	if err := os.WriteFile(filepath.Join(dir, ".env-sync.config.yaml"), []byte(`
+vercel:
+  token: ${UNDEFINED_VAR:-fallback}
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadAppConfig()
+	if err != nil {
+		t.Fatalf("エラーなしを期待: %v", err)
+	}
+	if cfg.Vercel.Token != "fallback" {
+		t.Errorf("Vercel.Token = %q, want fallback", cfg.Vercel.Token)
+	}
+}
+
+func TestLoadAppConfig_EnvRefExpansion_UndefinedError(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "no-global"))
+	chdirCleanup(t, dir)
+	t.Setenv("UNDEFINED_VAR", "")
+	if err := os.WriteFile(filepath.Join(dir, ".env-sync.config.yaml"), []byte(`
+vercel:
+  token: ${UNDEFINED_VAR}
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := config.LoadAppConfig()
+	if err == nil {
+		t.Fatal("未設定変数参照に対してエラーを期待したが nil")
+	}
+	if !strings.Contains(err.Error(), "UNDEFINED_VAR") {
+		t.Errorf("エラーメッセージに変数名が含まれることを期待: %v", err)
+	}
+}
+
+func TestLoadAppConfig_EnvRefExpansion_BackwardCompat(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "no-global"))
+	chdirCleanup(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, ".env-sync.config.yaml"), []byte(`
+vercel:
+  token: plain-token
+  project_id: plain-pid
+github:
+  repo: owner/repo
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadAppConfig()
+	if err != nil {
+		t.Fatalf("エラーなしを期待: %v", err)
+	}
+	if cfg.Vercel.Token != "plain-token" {
+		t.Errorf("Vercel.Token = %q, want plain-token", cfg.Vercel.Token)
+	}
+	if cfg.Vercel.ProjectID != "plain-pid" {
+		t.Errorf("Vercel.ProjectID = %q, want plain-pid", cfg.Vercel.ProjectID)
+	}
+	if cfg.GitHub.Repo != "owner/repo" {
+		t.Errorf("GitHub.Repo = %q, want owner/repo", cfg.GitHub.Repo)
+	}
+}
+
+func TestLoadAppConfig_EnvRefExpansion_AllFields(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "no-global"))
+	chdirCleanup(t, dir)
+	t.Setenv("V_TOKEN", "vtoken")
+	t.Setenv("V_PID", "vpid")
+	t.Setenv("V_TEAM", "vteam")
+	t.Setenv("GH_TOKEN", "ghtoken")
+	t.Setenv("GH_REPO", "owner/repo")
+	if err := os.WriteFile(filepath.Join(dir, ".env-sync.config.yaml"), []byte(`
+vercel:
+  token: ${V_TOKEN}
+  project_id: ${V_PID}
+  team_id: ${V_TEAM}
+github:
+  token: ${GH_TOKEN}
+  repo: ${GH_REPO}
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadAppConfig()
+	if err != nil {
+		t.Fatalf("エラーなしを期待: %v", err)
+	}
+	if cfg.Vercel.Token != "vtoken" {
+		t.Errorf("Vercel.Token = %q, want vtoken", cfg.Vercel.Token)
+	}
+	if cfg.Vercel.ProjectID != "vpid" {
+		t.Errorf("Vercel.ProjectID = %q, want vpid", cfg.Vercel.ProjectID)
+	}
+	if cfg.Vercel.TeamID != "vteam" {
+		t.Errorf("Vercel.TeamID = %q, want vteam", cfg.Vercel.TeamID)
+	}
+	if cfg.GitHub.Token != "ghtoken" {
+		t.Errorf("GitHub.Token = %q, want ghtoken", cfg.GitHub.Token)
+	}
+	if cfg.GitHub.Repo != "owner/repo" {
+		t.Errorf("GitHub.Repo = %q, want owner/repo", cfg.GitHub.Repo)
+	}
+}
+
+func TestLoadAppConfig_EnvRefExpansion_AltNameBeatsDirectEnv(t *testing.T) {
+	// 別名参照: MY_TOKEN=abc + token: ${MY_TOKEN} で abc が解決される
+	// （同名 VERCEL_TOKEN とは別の変数を使う）
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "no-global"))
+	chdirCleanup(t, dir)
+	t.Setenv("MY_VERCEL_TOKEN", "my-alt-token")
+	t.Setenv("VERCEL_TOKEN", "")
+	if err := os.WriteFile(filepath.Join(dir, ".env-sync.config.yaml"), []byte(`
+vercel:
+  token: ${MY_VERCEL_TOKEN}
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadAppConfig()
+	if err != nil {
+		t.Fatalf("エラーなしを期待: %v", err)
+	}
+	// ResolveVercelToken は VERCEL_TOKEN が空なので config の展開済み値を返す
+	if got := cfg.ResolveVercelToken(); got != "my-alt-token" {
+		t.Errorf("ResolveVercelToken = %q, want my-alt-token", got)
+	}
+}
+
 // --- ファイル不在時の後方互換テスト ---
 
 func TestLoadAppConfig_BackwardCompat_NoConfigFiles(t *testing.T) {
@@ -341,5 +497,24 @@ vercel:
 	}
 	if output != "" {
 		t.Errorf("0600 の場合は警告不要だが出力あり: %q", output)
+	}
+}
+
+// --- 空変数名バリデーションテスト ---
+
+func TestLoadAppConfig_EnvRefExpansion_EmptyVarNameError(t *testing.T) {
+	// ${:-fallback} のように変数名が空の場合はエラーを期待（タイポ検出）
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "no-global"))
+	chdirCleanup(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, ".env-sync.config.yaml"), []byte(`
+vercel:
+  token: ${:-fallback}
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := config.LoadAppConfig()
+	if err == nil {
+		t.Fatal("空変数名参照に対してエラーを期待したが nil")
 	}
 }

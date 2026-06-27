@@ -250,6 +250,28 @@ EOF
 env-sync --env .env.production
 ```
 
+### 環境変数参照 `${VAR}` / `${VAR:-default}`
+
+config の値に環境変数参照を書くことができます（平文トークンを config ファイルに書きたくない場合に便利です）。
+
+| 記法 | 動作 |
+|------|------|
+| `${VAR}` | 環境変数 `VAR` の値に展開。`VAR` が未設定（空含む）の場合はエラーで中止 |
+| `${VAR:-default}` | `VAR` が設定されていれば `VAR` の値、未設定または空文字なら `default` を使用 |
+
+```yaml
+vercel:
+  token: ${MY_VERCEL_TOKEN}          # MY_VERCEL_TOKEN 未設定ならエラー
+  project_id: ${V_PID:-prj_default}  # V_PID 未設定なら prj_default
+github:
+  token: ${GH_TOKEN}
+  repo: ${GH_REPO:-myorg/myrepo}
+```
+
+> **注意**: 既存の優先順位「環境変数 > project config > global config」は維持されます。
+> config に `token: ${VERCEL_TOKEN}` と書いても、`VERCEL_TOKEN` 環境変数が設定されていれば直接 env が優先されるため実質同じ値になります。
+> **別名変数**（例: `${MY_VERCEL_TOKEN}`）を使うケースで本機能が活きます。
+
 > **セキュリティ**: global config にトークンが含まれていてファイルパーミッションが `0600` でない場合、実行時に stderr へ警告を出力します。`chmod 0600 ~/.config/env-sync/config.yaml` で修正してください。暗号化保存・キーチェーン連携は対象外です（将来検討）。
 
 ## 定義ファイル `env-sync.yaml`
