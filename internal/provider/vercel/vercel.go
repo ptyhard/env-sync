@@ -36,6 +36,7 @@ func (v *vercelProvider) Name() string { return "vercel" }
 
 // Sync は Vercel への環境変数同期を行う。
 // vercel.projects が設定されている場合は複数プロジェクトへ順に同期する。
+// 各 Entry の VercelProjects が設定されている場合は、そのプロジェクトにのみ送信する。
 func (v *vercelProvider) Sync(opts provider.Options, entries []provider.Entry) error {
 	// ---- 認証情報 / プロジェクト ----
 	appCfg, err := config.LoadAppConfig()
@@ -52,10 +53,21 @@ func (v *vercelProvider) Sync(opts provider.Options, entries []provider.Entry) e
 		return err
 	}
 
-	// ---- 登録対象を組み立て ----
-	items, err := entriesToVercelItems(entries)
-	if err != nil {
+	// ---- vercel_project バリデーション ----
+	if err := validateEntryVercelProjects(entries, appCfg.Vercel.Projects); err != nil {
 		return err
+	}
+
+	// ---- ターゲットごとの登録対象を組み立て ----
+	// vercel_project が指定された Entry はそのプロジェクトにのみ送信するためターゲット別にフィルタする。
+	perTargetItems := make([][]item, len(targets))
+	for i, tgt := range targets {
+		targetEntries := filterEntriesByVercelProject(entries, tgt.Name)
+		tgtItems, err := entriesToVercelItems(targetEntries)
+		if err != nil {
+			return err
+		}
+		perTargetItems[i] = tgtItems
 	}
 
 	client := &http.Client{Timeout: httpTimeout}
@@ -86,6 +98,8 @@ func (v *vercelProvider) Sync(opts provider.Options, entries []provider.Entry) e
 	perTargetClassified := make([][]classifiedVercelItem, len(targets))
 	tokenMissing := make([]bool, len(targets))
 	for i, tgt := range targets {
+		items := perTargetItems[i]
+
 		// トークン未設定チェック（per-target）
 		// 単一ターゲット時は即エラー返却。複数ターゲット時は失敗として記録して残りを継続する。
 		if !opts.DryRun && tgt.Token == "" {
@@ -142,7 +156,11 @@ func (v *vercelProvider) Sync(opts provider.Options, entries []provider.Entry) e
 		fmt.Println()
 	}
 
-	if len(items) == 0 {
+	totalItems := 0
+	for _, items := range perTargetItems {
+		totalItems += len(items)
+	}
+	if totalItems == 0 {
 		fmt.Println("登録対象がありません")
 		return nil
 	}
@@ -169,7 +187,7 @@ func (v *vercelProvider) Sync(opts provider.Options, entries []provider.Entry) e
 		for i, m := range tokenMissing {
 			if !m {
 				classified := perTargetClassified[i]
-				_, updateCount := countClassified(classified, len(items))
+				_, updateCount := countClassified(classified, len(perTargetItems[i]))
 				needsConfirm = classified == nil || updateCount > 0
 				break
 			}
@@ -199,7 +217,7 @@ func (v *vercelProvider) Sync(opts provider.Options, entries []provider.Entry) e
 	for i, tgt := range targets {
 		if tokenMissing[i] {
 			// 一覧表示フェーズで警告済み。失敗件数として集計する。
-			totalNG += len(items)
+			totalNG += len(perTargetItems[i])
 			continue
 		}
 		targetLabel := tgt.ProjectID
@@ -209,7 +227,7 @@ func (v *vercelProvider) Sync(opts provider.Options, entries []provider.Entry) e
 		if activeCount > 1 {
 			fmt.Printf("\n--- プロジェクト: %s ---\n", targetLabel)
 		}
-		ok, ng := syncOneVercelTarget(client, tgt.Token, tgt.ProjectID, tgt.TeamID, items)
+		ok, ng := syncOneVercelTarget(client, tgt.Token, tgt.ProjectID, tgt.TeamID, perTargetItems[i])
 		totalOK += ok
 		totalNG += ng
 	}
@@ -221,6 +239,56 @@ func (v *vercelProvider) Sync(opts provider.Options, entries []provider.Entry) e
 	}
 	if totalNG > 0 {
 		os.Exit(1)
+	}
+	return nil
+}
+
+// filterEntriesByVercelProject は tgtName に向けて送信すべき Entry のみを返す。
+// entry.VercelProjects が空なら全ターゲット向け（フィルタなし）。
+// entry.VercelProjects が設定されている場合、tgtName が含まれるもののみ返す。
+func filterEntriesByVercelProject(entries []provider.Entry, tgtName string) []provider.Entry {
+	var result []provider.Entry
+	for _, e := range entries {
+		if len(e.VercelProjects) == 0 {
+			result = append(result, e)
+			continue
+		}
+		for _, p := range e.VercelProjects {
+			if p == tgtName {
+				result = append(result, e)
+				break
+			}
+		}
+	}
+	return result
+}
+
+// validateEntryVercelProjects は entries の VercelProjects フィールドを検証する。
+// vercel.projects[] が未定義（単一解決モード）の場合は VercelProjects を指定できない。
+// vercel.projects[] が定義されている場合は全プロジェクト名の存在チェックを行う。
+func validateEntryVercelProjects(entries []provider.Entry, projects []config.VercelProjectConf) error {
+	if len(projects) == 0 {
+		for _, e := range entries {
+			if len(e.VercelProjects) > 0 {
+				return fmt.Errorf("%s: vercel_project が指定されていますが config に vercel.projects が定義されていません（vercel_project は vercel.projects[] と組み合わせて使用してください）", e.Key)
+			}
+		}
+		return nil
+	}
+	validNames := make(map[string]bool, len(projects))
+	for _, p := range projects {
+		validNames[p.Name] = true
+	}
+	for _, e := range entries {
+		for _, vp := range e.VercelProjects {
+			if !validNames[vp] {
+				names := make([]string, 0, len(projects))
+				for _, p := range projects {
+					names = append(names, p.Name)
+				}
+				return fmt.Errorf("%s: vercel_project %q は config の vercel.projects に存在しません（定義済み: %s）", e.Key, vp, strings.Join(names, ", "))
+			}
+		}
 	}
 	return nil
 }

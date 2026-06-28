@@ -15,11 +15,12 @@ type Options struct {
 // Entry は provider 非依存の共通ドメインモデル。
 // 登録する環境変数 1 件分の情報を保持する。
 type Entry struct {
-	Key          string
-	Value        string
-	Secret       bool
-	Environments []string
-	Providers    []string // 同期先プロバイダーのリスト（"vercel" / "github" など）
+	Key            string
+	Value          string
+	Secret         bool
+	Environments   []string
+	Providers      []string // 同期先プロバイダーのリスト（"vercel" / "github" など）
+	VercelProjects []string // 送信先 Vercel プロジェクト名のリスト（未指定なら全ターゲット）
 }
 
 // Provider は同期先を抽象化するインターフェース。

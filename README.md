@@ -292,6 +292,28 @@ env-sync --provider github --env .env.production --github-repo infra
 
 > **後方互換**: `projects` / `repos` を定義しない場合は、従来どおり単一の `vercel.project_id` / `github.repo`（および環境変数・`.vercel/project.json` / git remote フォールバック）で 1 ターゲットへ同期します。
 
+#### 変数ごとに送信先 Vercel プロジェクトを絞り込む（`vercel_project`）
+
+`--vercel-project` フラグは実行全体を 1 プロジェクトに絞りますが、`env-sync.yaml` の各変数で `vercel_project` を指定すると、**変数単位**で送信先 Vercel プロジェクトを `name` で絞り込めます（`vercel.projects[]` の定義が前提）。
+
+```yaml
+# env-sync.yaml
+defaults:
+  secret: true
+  # vercel_project: web        # defaults に書くと全変数のデフォルト送信先になる
+
+variables:
+  WEB_API_URL:   { provider: vercel, vercel_project: web }          # web にのみ送る
+  ADMIN_API_URL: { provider: vercel, vercel_project: admin }        # admin にのみ送る
+  SHARED_DB_URL: { provider: vercel, vercel_project: [web, admin] } # web と admin に送る
+  COMMON_KEY:    { provider: vercel }                               # vercel_project 未指定 → 全プロジェクトへ（従来どおり）
+```
+
+- **解決優先順位**: 変数個別 `vercel_project` > `defaults.vercel_project`。未指定の変数は解決済みの全 Vercel ターゲットへ送ります（後方互換）。
+- **CLI `--vercel-project` との併用は AND**: CLI で絞り込んだターゲット集合に対し、さらに変数ごとの `vercel_project` でフィルタされます。
+- `vercel_project` に指定する `name` は `vercel.projects[].name` を指します。存在しない `name` を指定するとエラーで停止します。
+- `vercel.projects[]` を定義していない単一解決モードでは `vercel_project` は指定できません（エラーになります）。
+
 ### 使用例
 
 ```bash
@@ -361,6 +383,7 @@ variables:
 | `secret` | `bool` | `true`（デフォルト）: シークレット登録 / `false`: 平文登録 |
 | `environments` | `[]string` | 登録先環境の配列。省略すると `defaults.environments` を継承 |
 | `provider` | `string` または `[]string` | 同期先プロバイダー。省略すると `defaults.provider` → CLI `--provider` フラグを使用 |
+| `vercel_project` | `string` または `[]string` | この変数の送信先 Vercel プロジェクト名（`vercel.projects[].name`）。省略すると `defaults.vercel_project` → 全 Vercel ターゲット。詳細は[変数ごとに送信先 Vercel プロジェクトを絞り込む](#変数ごとに送信先-vercel-プロジェクトを絞り込むvercel_project)を参照 |
 
 #### Vercel における各フィールドの意味
 

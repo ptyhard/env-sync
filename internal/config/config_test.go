@@ -211,3 +211,85 @@ func TestParseFlags_GitHubRepo_Default(t *testing.T) {
 		t.Errorf("GitHubRepo のデフォルト = %q, want empty", opts.GitHubRepo)
 	}
 }
+
+// --- VarConf.VercelProject の YAML パーステスト ---
+
+func TestVarConf_VercelProject_String(t *testing.T) {
+	yaml := `
+variables:
+  API_URL:
+    vercel_project: app-a
+`
+	var def config.Definition
+	if err := unmarshalDefinition(yaml, &def); err != nil {
+		t.Fatalf("Unmarshal エラー: %v", err)
+	}
+	conf := def.Variables["API_URL"]
+	if conf.VercelProject == nil {
+		t.Fatal("VercelProject が nil")
+	}
+	if len(conf.VercelProject.Values) != 1 || conf.VercelProject.Values[0] != "app-a" {
+		t.Errorf("VercelProject.Values = %v, want [app-a]", conf.VercelProject.Values)
+	}
+}
+
+func TestVarConf_VercelProject_Sequence(t *testing.T) {
+	yaml := `
+variables:
+  DB_URL:
+    vercel_project: [app-a, app-b]
+`
+	var def config.Definition
+	if err := unmarshalDefinition(yaml, &def); err != nil {
+		t.Fatalf("Unmarshal エラー: %v", err)
+	}
+	conf := def.Variables["DB_URL"]
+	if conf.VercelProject == nil {
+		t.Fatal("VercelProject が nil")
+	}
+	if len(conf.VercelProject.Values) != 2 {
+		t.Fatalf("VercelProject.Values len = %d, want 2", len(conf.VercelProject.Values))
+	}
+	if conf.VercelProject.Values[0] != "app-a" || conf.VercelProject.Values[1] != "app-b" {
+		t.Errorf("VercelProject.Values = %v, want [app-a app-b]", conf.VercelProject.Values)
+	}
+}
+
+func TestVarConf_VercelProject_Nil(t *testing.T) {
+	yaml := `
+variables:
+  FOO:
+    secret: true
+`
+	var def config.Definition
+	if err := unmarshalDefinition(yaml, &def); err != nil {
+		t.Fatalf("Unmarshal エラー: %v", err)
+	}
+	conf := def.Variables["FOO"]
+	if conf.VercelProject != nil {
+		t.Errorf("vercel_project 未指定なのに非 nil: %v", conf.VercelProject)
+	}
+}
+
+func TestDefinition_Defaults_VercelProject(t *testing.T) {
+	yaml := `
+defaults:
+  vercel_project: app-a
+variables:
+  FOO: {}
+`
+	var def config.Definition
+	if err := unmarshalDefinition(yaml, &def); err != nil {
+		t.Fatalf("Unmarshal エラー: %v", err)
+	}
+	if def.Defaults.VercelProject == nil {
+		t.Fatal("Defaults.VercelProject が nil")
+	}
+	if len(def.Defaults.VercelProject.Values) != 1 || def.Defaults.VercelProject.Values[0] != "app-a" {
+		t.Errorf("Defaults.VercelProject.Values = %v, want [app-a]", def.Defaults.VercelProject.Values)
+	}
+}
+
+func unmarshalDefinition(src string, def *config.Definition) error {
+	return yaml.Unmarshal([]byte(src), def)
+}

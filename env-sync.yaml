@@ -27,6 +27,15 @@
 #           解決優先順位: 変数個別 > defaults > CLI --provider フラグ（デフォルト vercel）
 #           ※ 未指定なら defaults.provider → --provider フラグのデフォルト（vercel）が使われる
 #
+#   vercel_project: app-a|[app-a, app-b]
+#           変数ごとに送信先 Vercel プロジェクトを name で絞り込む（provider に vercel を含む場合のみ有効）。
+#           - vercel_project: app-a           この変数を app-a にのみ送る
+#           - vercel_project: [app-a, app-b]  この変数を app-a と app-b に送る
+#           解決優先順位: 変数個別 > defaults（未指定なら解決済みの全 Vercel ターゲットへ送る＝従来どおり）
+#           CLI --vercel-project と併用した場合は AND（CLI で絞り込んだ集合と vercel_project の積）。
+#           ※ name は認証 config の vercel.projects[].name を指す。存在しない name はエラー。
+#           ※ vercel.projects[] を定義していない単一解決モードでは指定できない（エラー）。
+#
 #   ---- GCP Secret Manager ----
 #           必須環境変数: GCP_PROJECT_ID（対象 GCP プロジェクト ID）
 #           認証: Application Default Credentials（GOOGLE_APPLICATION_CREDENTIALS または ADC 自動解決）
@@ -53,6 +62,10 @@ variables:
   # VERCEL_ONLY_KEY:          { provider: vercel }
   # GITHUB_ONLY_KEY:          { provider: github }
   # SHARED_KEY:               { provider: [vercel, github] }
+  #
+  # ---- 変数ごとの送信先 Vercel プロジェクト指定の例（vercel.projects[] 定義が前提） ----
+  # APP_A_API_URL:            { provider: vercel, vercel_project: app-a }
+  # SHARED_DB_URL:            { provider: vercel, vercel_project: [app-a, app-b] }
   #
   # ---- GCP Secret Manager の例 ----
   # GCP_PROJECT_ID=my-gcp-project env-sync --provider gcp --env .env.production

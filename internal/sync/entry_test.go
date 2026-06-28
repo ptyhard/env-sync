@@ -392,3 +392,85 @@ func TestResolveEntries_ReturnsProviderEntry(t *testing.T) {
 		t.Fatalf("entries len = %d, want 1", len(entries))
 	}
 }
+
+// --- vercel_project の解決テスト ---
+
+func TestResolveEntries_VercelProject_VarConf(t *testing.T) {
+	def := config.Definition{
+		Variables: map[string]config.VarConf{
+			"API_URL": {VercelProject: &config.ProviderVal{Values: []string{"app-a"}}},
+		},
+	}
+	envVars := map[string]string{"API_URL": "https://example.com"}
+	entries, err := ResolveEntries(def, envVars, []string{"API_URL"}, "vercel")
+	if err != nil {
+		t.Fatalf("ResolveEntries エラー: %v", err)
+	}
+	if len(entries[0].VercelProjects) != 1 || entries[0].VercelProjects[0] != "app-a" {
+		t.Errorf("VercelProjects = %v, want [app-a]", entries[0].VercelProjects)
+	}
+}
+
+func TestResolveEntries_VercelProject_Multiple(t *testing.T) {
+	def := config.Definition{
+		Variables: map[string]config.VarConf{
+			"DB_URL": {VercelProject: &config.ProviderVal{Values: []string{"app-a", "app-b"}}},
+		},
+	}
+	envVars := map[string]string{"DB_URL": "postgres://..."}
+	entries, err := ResolveEntries(def, envVars, []string{"DB_URL"}, "vercel")
+	if err != nil {
+		t.Fatalf("ResolveEntries エラー: %v", err)
+	}
+	if len(entries[0].VercelProjects) != 2 {
+		t.Fatalf("VercelProjects len = %d, want 2", len(entries[0].VercelProjects))
+	}
+}
+
+func TestResolveEntries_VercelProject_DefaultsInherit(t *testing.T) {
+	def := config.Definition{}
+	def.Defaults.VercelProject = &config.ProviderVal{Values: []string{"app-a"}}
+	def.Variables = map[string]config.VarConf{
+		"FOO": {},
+	}
+	envVars := map[string]string{"FOO": "bar"}
+	entries, err := ResolveEntries(def, envVars, []string{"FOO"}, "vercel")
+	if err != nil {
+		t.Fatalf("ResolveEntries エラー: %v", err)
+	}
+	if len(entries[0].VercelProjects) != 1 || entries[0].VercelProjects[0] != "app-a" {
+		t.Errorf("VercelProjects = %v, want [app-a] (defaults から継承)", entries[0].VercelProjects)
+	}
+}
+
+func TestResolveEntries_VercelProject_VarConfOverridesDefaults(t *testing.T) {
+	def := config.Definition{}
+	def.Defaults.VercelProject = &config.ProviderVal{Values: []string{"app-a"}}
+	def.Variables = map[string]config.VarConf{
+		"FOO": {VercelProject: &config.ProviderVal{Values: []string{"app-b"}}},
+	}
+	envVars := map[string]string{"FOO": "bar"}
+	entries, err := ResolveEntries(def, envVars, []string{"FOO"}, "vercel")
+	if err != nil {
+		t.Fatalf("ResolveEntries エラー: %v", err)
+	}
+	if len(entries[0].VercelProjects) != 1 || entries[0].VercelProjects[0] != "app-b" {
+		t.Errorf("VercelProjects = %v, want [app-b] (varConf が defaults を上書き)", entries[0].VercelProjects)
+	}
+}
+
+func TestResolveEntries_VercelProject_Unset(t *testing.T) {
+	def := config.Definition{
+		Variables: map[string]config.VarConf{
+			"FOO": {},
+		},
+	}
+	envVars := map[string]string{"FOO": "bar"}
+	entries, err := ResolveEntries(def, envVars, []string{"FOO"}, "vercel")
+	if err != nil {
+		t.Fatalf("ResolveEntries エラー: %v", err)
+	}
+	if len(entries[0].VercelProjects) != 0 {
+		t.Errorf("VercelProjects = %v, want [] (未指定なら全ターゲット向け)", entries[0].VercelProjects)
+	}
+}
