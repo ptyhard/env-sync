@@ -74,24 +74,11 @@ func (v *vercelProvider) Sync(opts provider.Options, entries []provider.Entry) e
 	client := &http.Client{Timeout: httpTimeout}
 
 	// ---- ProjectID の解決（単一ターゲット時のみ .vercel/project.json フォールバック） ----
+	if _, err := applyProjectJSONFallback(targets); err != nil {
+		return err
+	}
 	if len(targets) == 1 && targets[0].ProjectID == "" {
-		pjText, err := os.ReadFile(".vercel/project.json")
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("%s", i18n.T(i18n.MsgVercelProjectJSONReadFail, err))
-		}
-		if err == nil {
-			var pj projectJSON
-			if err := json.Unmarshal(pjText, &pj); err != nil {
-				return fmt.Errorf("%s", i18n.T(i18n.MsgVercelProjectJSONParseFail, err))
-			}
-			targets[0].ProjectID = pj.ProjectID
-			if targets[0].TeamID == "" {
-				targets[0].TeamID = pj.OrgID
-			}
-		}
-		if targets[0].ProjectID == "" {
-			return fmt.Errorf("%s", i18n.T(i18n.MsgVercelProjectIDMissing))
-		}
+		return fmt.Errorf("%s", i18n.T(i18n.MsgVercelProjectIDMissing))
 	}
 	// ---- 各ターゲットに対して一覧表示と分類（dry-run も同様）----
 	// perTargetClassified はターゲット順に分類結果を保持し、確認・送信フェーズで再利用する。
@@ -468,6 +455,71 @@ type item struct {
 type projectJSON struct {
 	ProjectID string `json:"projectId"`
 	OrgID     string `json:"orgId"`
+}
+
+// applyProjectJSONFallback は単一ターゲット時の .vercel/project.json フォールバックを行う。
+// targets[0].ProjectID が空の場合に .vercel/project.json から取得を試みる。
+// 成功時は targets[0].ProjectID / TeamID / ProjectIDSource / TeamIDSource を更新し used=true を返す。
+// .vercel/project.json が存在しない場合は (false, nil) を返す（エラーではない）。
+func applyProjectJSONFallback(targets []config.VercelTarget) (usedProjectJSON bool, err error) {
+	if len(targets) != 1 || targets[0].ProjectID != "" {
+		return false, nil
+	}
+	pjText, readErr := os.ReadFile(".vercel/project.json")
+	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+		return false, fmt.Errorf("%s", i18n.T(i18n.MsgVercelProjectJSONReadFail, readErr))
+	}
+	if readErr == nil {
+		var pj projectJSON
+		if err := json.Unmarshal(pjText, &pj); err != nil {
+			return false, fmt.Errorf("%s", i18n.T(i18n.MsgVercelProjectJSONParseFail, err))
+		}
+		// projectId が実際に含まれている場合のみ ProjectIDSource を更新する。
+		// project.json に projectId フィールドが無い場合は source を "project_json" にしない。
+		if pj.ProjectID != "" {
+			targets[0].ProjectID = pj.ProjectID
+			targets[0].ProjectIDSource = "project_json"
+		}
+		if targets[0].TeamID == "" && pj.OrgID != "" {
+			targets[0].TeamID = pj.OrgID
+			targets[0].TeamIDSource = "project_json"
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
+// vercelCheckAccess は GET /v10/projects/{id}/env で Vercel API への到達確認を行う。
+// 成功・失敗に関わらず (statusCode, detail, nil) を返す。HTTP 以外のエラーは err に返す。
+func vercelCheckAccess(client *http.Client, token, projectID, teamID string) (statusCode int, detail string, err error) {
+	u, err := url.Parse(fmt.Sprintf("%s/v10/projects/%s/env", apiBase, url.PathEscape(projectID)))
+	if err != nil {
+		return 0, "", err
+	}
+	q := u.Query()
+	if teamID != "" {
+		q.Set("teamId", teamID)
+	}
+	u.RawQuery = q.Encode()
+
+	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
+	if err != nil {
+		return 0, "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	res, err := client.Do(req)
+	if err != nil {
+		return 0, "", err
+	}
+	defer res.Body.Close()
+	// 2xx 以外の場合のみエラー詳細を読む。2xx 時はレスポンスボディが大きくなり得るためドレインのみ行う。
+	if res.StatusCode >= 200 && res.StatusCode < 300 {
+		io.Copy(io.Discard, res.Body) //nolint:errcheck // drain で接続を再利用可能にする
+		return res.StatusCode, "", nil
+	}
+	d := parseErrorBody(res.Body)
+	return res.StatusCode, d, nil
 }
 
 // parseErrorBody は Vercel のエラーレスポンス本文からメッセージを取り出す。

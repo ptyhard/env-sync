@@ -21,8 +21,9 @@ var enCatalog = map[MsgKey]string{
 	MsgUsage: `env-sync - sync environment variables declared in a definition file to Vercel or GitHub Actions
 
 Subcommands:
-  init    generate env-sync.yaml template from .env
-  setup   interactively generate an auth config file (.env-sync.config.yaml / ~/.config/env-sync/config.yaml)
+  init      generate env-sync.yaml template from .env
+  setup     interactively generate an auth config file (.env-sync.config.yaml / ~/.config/env-sync/config.yaml)
+  validate  verify token / projectId / repo and check API reachability (read-only, no writes)
 
 Usage:
   VERCEL_TOKEN=xxxxx env-sync [options]
@@ -274,6 +275,32 @@ YAML schema (definition file env-sync.yaml):
 	MsgGCPSecretCreateFail:      "failed to create Secret: %s",
 	MsgGCPSecretLabelUpdateFail: "failed to update Secret labels: %s",
 	MsgGCPSecretVersionAddFail:  "failed to add Secret version: %s",
+
+	// ----- Validate サブコマンド -----
+	MsgValidateHeader:               "=== validate: %s ===\n",
+	MsgValidateProviderUnsupported:  "  [skip] %s: validate not supported\n",
+	MsgValidateSourceEnv:            "env var",
+	MsgValidateSourceConfig:         "config file",
+	MsgValidateSourceProjectJSON:    ".vercel/project.json",
+	MsgValidateSourceGitRemote:      "git remote",
+	MsgValidateSourceUnset:          "(unset)",
+	MsgValidateTokenMasked:          "[set] (source: %s)",
+	MsgValidateTokenUnset:           "[unset]",
+	MsgValidateHTTPStatus:           "HTTP %d",
+	MsgValidateOK:                   "OK",
+	MsgValidateTokenUnsetSkip:       "  token is not set, skipping API check\n",
+	MsgValidateProjectIDUnsetSkip:   "  projectId is not set, skipping API check\n",
+	MsgValidateRepoUnresolvableSkip: "  repo could not be resolved, skipping API check\n",
+	MsgValidateVercelCause404:       "  Possible cause: teamId not set, or projectId mismatch\n",
+	MsgValidateVercelCause401:       "  Possible cause: token is invalid\n",
+	MsgValidateVercelCause403:       "  Possible cause: token lacks required scope\n",
+	MsgValidateGitHubCause404:       "  Possible cause: repo does not exist or token lacks access to private repo\n",
+	MsgValidateGitHubCause401:       "  Possible cause: token is invalid\n",
+	MsgValidateGitHubCause403:       "  Possible cause: token lacks required scope or rate limit exceeded\n",
+	MsgValidateResult:               "validate: success %d / failed %d\n",
+	MsgValidateVercelProjectID:      "  projectId : %s (source: %s)\n",
+	MsgValidateVercelTeamID:         "  teamId    : %s (source: %s)\n",
+	MsgValidateGitHubRepo:           "  repo      : %s (source: %s)\n",
 
 	// ----- Sync / Entry 解決 -----
 	MsgDefaultsProviderInvalid: "defaults.provider: invalid provider value %q (must be one of: %s)",

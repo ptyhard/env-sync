@@ -33,6 +33,12 @@ type Provider interface {
 	Sync(opts Options, entries []Entry) error
 }
 
+// Validator は読み取り専用で認証・ターゲット解決を検証できる provider が実装する任意インターフェース。
+// Validate は GET のみを使用し、環境変数の登録・変更を行わない。
+type Validator interface {
+	Validate(opts Options, entries []Entry) error
+}
+
 // providerRegistry は名前 → ファクトリ関数のマップ。
 var providerRegistry = map[string]func() Provider{}
 

@@ -45,18 +45,23 @@ type GitHubRepoConf struct {
 // VercelTarget は ResolveVercelTargets が返す解決済みターゲット。
 type VercelTarget struct {
 	// Name は config 上のターゲット名。単一解決の場合は空になる。
-	Name      string
-	ProjectID string
-	TeamID    string
-	Token     string
+	Name            string
+	ProjectID       string
+	TeamID          string
+	Token           string
+	TokenSource     string // 取得元: "env" / "config" / ""（未設定）
+	ProjectIDSource string // 取得元: "env" / "config" / "project_json" / ""（未設定）
+	TeamIDSource    string // 取得元: "env" / "config" / "project_json" / ""（未設定）
 }
 
 // GitHubTarget は ResolveGitHubTargets が返す解決済みターゲット。
 type GitHubTarget struct {
 	// Name は config 上のターゲット名。単一解決の場合は空になる。
-	Name  string
-	Repo  string
-	Token string
+	Name        string
+	Repo        string
+	Token       string
+	TokenSource string // 取得元: "env" / "config" / ""（未設定）
+	RepoSource  string // 取得元: "env" / "config" / "git_remote" / ""（未設定）
 }
 
 // AppVercelConfig は Vercel の認証情報・ID。
@@ -325,6 +330,61 @@ func (cfg *AppConfig) ResolveGitHubRepo() string {
 	return cfg.GitHub.Repo
 }
 
+// ResolveVercelTokenWithSource は token とその取得元 ("env"/"config"/"") を返す。
+func (cfg *AppConfig) ResolveVercelTokenWithSource() (val, source string) {
+	if v := os.Getenv("VERCEL_TOKEN"); v != "" {
+		return v, "env"
+	}
+	if cfg.Vercel.Token != "" {
+		return cfg.Vercel.Token, "config"
+	}
+	return "", ""
+}
+
+// ResolveVercelProjectIDWithSource は project ID とその取得元 ("env"/"config"/"") を返す。
+func (cfg *AppConfig) ResolveVercelProjectIDWithSource() (val, source string) {
+	if v := os.Getenv("VERCEL_PROJECT_ID"); v != "" {
+		return v, "env"
+	}
+	if cfg.Vercel.ProjectID != "" {
+		return cfg.Vercel.ProjectID, "config"
+	}
+	return "", ""
+}
+
+// ResolveVercelTeamIDWithSource は team ID とその取得元 ("env"/"config"/"") を返す。
+func (cfg *AppConfig) ResolveVercelTeamIDWithSource() (val, source string) {
+	if v := os.Getenv("VERCEL_TEAM_ID"); v != "" {
+		return v, "env"
+	}
+	if cfg.Vercel.TeamID != "" {
+		return cfg.Vercel.TeamID, "config"
+	}
+	return "", ""
+}
+
+// ResolveGitHubTokenWithSource は token とその取得元 ("env"/"config"/"") を返す。
+func (cfg *AppConfig) ResolveGitHubTokenWithSource() (val, source string) {
+	if v := os.Getenv("GITHUB_TOKEN"); v != "" {
+		return v, "env"
+	}
+	if cfg.GitHub.Token != "" {
+		return cfg.GitHub.Token, "config"
+	}
+	return "", ""
+}
+
+// ResolveGitHubRepoWithSource は repo とその取得元 ("env"/"config"/"") を返す。
+func (cfg *AppConfig) ResolveGitHubRepoWithSource() (val, source string) {
+	if v := os.Getenv("GITHUB_REPO"); v != "" {
+		return v, "env"
+	}
+	if cfg.GitHub.Repo != "" {
+		return cfg.GitHub.Repo, "config"
+	}
+	return "", ""
+}
+
 // resolveVercelToken はトークンの解決優先順位（per-target > 環境変数 > top-level config）を実装する。
 // perTargetToken が非空ならそれを返す。空なら top-level の ResolveVercelToken()（環境変数 > config）を使う。
 func (cfg *AppConfig) resolveVercelToken(perTargetToken string) string {
@@ -332,6 +392,30 @@ func (cfg *AppConfig) resolveVercelToken(perTargetToken string) string {
 		return perTargetToken
 	}
 	return cfg.ResolveVercelToken()
+}
+
+// resolveVercelTokenWithSource はトークンと取得元を返す（per-target > 環境変数 > top-level config）。
+func (cfg *AppConfig) resolveVercelTokenWithSource(perTargetToken string) (string, string) {
+	if perTargetToken != "" {
+		return perTargetToken, "config"
+	}
+	return cfg.ResolveVercelTokenWithSource()
+}
+
+// resolveVercelTeamIDWithSource はチーム ID と取得元を返す（per-target > 環境変数 > top-level config）。
+func (cfg *AppConfig) resolveVercelTeamIDWithSource(perTargetTeamID string) (string, string) {
+	if perTargetTeamID != "" {
+		return perTargetTeamID, "config"
+	}
+	return cfg.ResolveVercelTeamIDWithSource()
+}
+
+// resolveGitHubTokenWithSource はトークンと取得元を返す（per-target > 環境変数 > top-level config）。
+func (cfg *AppConfig) resolveGitHubTokenWithSource(perTargetToken string) (string, string) {
+	if perTargetToken != "" {
+		return perTargetToken, "config"
+	}
+	return cfg.ResolveGitHubTokenWithSource()
 }
 
 // resolveVercelTeamID はチーム ID の解決優先順位（per-target > 環境変数 > top-level config）を実装する。
@@ -363,12 +447,18 @@ func (cfg *AppConfig) ResolveVercelTargets(selectName string) ([]VercelTarget, e
 		if selectName != "" {
 			return nil, fmt.Errorf("%s", i18n.T(i18n.MsgVercelProjectsNotDefined))
 		}
-		// 後方互換: 従来の単一解決
+		// 後方互換: 従来の単一解決（取得元も付与）
+		tok, tokSrc := cfg.ResolveVercelTokenWithSource()
+		pid, pidSrc := cfg.ResolveVercelProjectIDWithSource()
+		tid, tidSrc := cfg.ResolveVercelTeamIDWithSource()
 		return []VercelTarget{
 			{
-				ProjectID: cfg.ResolveVercelProjectID(),
-				TeamID:    cfg.ResolveVercelTeamID(),
-				Token:     cfg.ResolveVercelToken(),
+				ProjectID:       pid,
+				ProjectIDSource: pidSrc,
+				TeamID:          tid,
+				TeamIDSource:    tidSrc,
+				Token:           tok,
+				TokenSource:     tokSrc,
 			},
 		}, nil
 	}
@@ -385,11 +475,16 @@ func (cfg *AppConfig) ResolveVercelTargets(selectName string) ([]VercelTarget, e
 		if selectName != "" && p.Name != selectName {
 			continue
 		}
+		tok, tokSrc := cfg.resolveVercelTokenWithSource(p.Token)
+		tid, tidSrc := cfg.resolveVercelTeamIDWithSource(p.TeamID)
 		targets = append(targets, VercelTarget{
-			Name:      p.Name,
-			ProjectID: p.ProjectID,
-			TeamID:    cfg.resolveVercelTeamID(p.TeamID),
-			Token:     cfg.resolveVercelToken(p.Token),
+			Name:            p.Name,
+			ProjectID:       p.ProjectID,
+			ProjectIDSource: "config",
+			TeamID:          tid,
+			TeamIDSource:    tidSrc,
+			Token:           tok,
+			TokenSource:     tokSrc,
 		})
 	}
 
@@ -430,11 +525,15 @@ func (cfg *AppConfig) ResolveGitHubTargets(selectName string) ([]GitHubTarget, e
 		if selectName != "" {
 			return nil, fmt.Errorf("%s", i18n.T(i18n.MsgGitHubReposNotDefined))
 		}
-		// 後方互換: 従来の単一解決
+		// 後方互換: 従来の単一解決（取得元も付与）
+		tok, tokSrc := cfg.ResolveGitHubTokenWithSource()
+		repo, repoSrc := cfg.ResolveGitHubRepoWithSource()
 		return []GitHubTarget{
 			{
-				Repo:  cfg.ResolveGitHubRepo(),
-				Token: cfg.ResolveGitHubToken(),
+				Repo:        repo,
+				RepoSource:  repoSrc,
+				Token:       tok,
+				TokenSource: tokSrc,
 			},
 		}, nil
 	}
@@ -451,10 +550,13 @@ func (cfg *AppConfig) ResolveGitHubTargets(selectName string) ([]GitHubTarget, e
 		if selectName != "" && r.Name != selectName {
 			continue
 		}
+		tok, tokSrc := cfg.resolveGitHubTokenWithSource(r.Token)
 		targets = append(targets, GitHubTarget{
-			Name:  r.Name,
-			Repo:  r.Repo,
-			Token: cfg.resolveGitHubToken(r.Token),
+			Name:        r.Name,
+			Repo:        r.Repo,
+			RepoSource:  "config",
+			Token:       tok,
+			TokenSource: tokSrc,
 		})
 	}
 

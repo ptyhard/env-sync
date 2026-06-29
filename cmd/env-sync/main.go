@@ -203,6 +203,20 @@ func run() error {
 		return config.RunSetup(args[1:], printUsage)
 	}
 
+	if len(args) > 0 && args[0] == "validate" {
+		// --lang フラグと AppConfig の language フィールドも言語解決に含める。
+		// PrescanLang はフラグ解析前に --lang/--language の値だけを先読みする。
+		prescannedLang := config.PrescanLang(args[1:])
+		// config 読み込み失敗時は configLang を "" として継続する。
+		// エラーは後続の本処理（validate ロジック内の LoadAppConfig 呼び出し等）で顕在化する。
+		var configLang string
+		if appCfg, err := config.LoadAppConfig(); err == nil {
+			configLang = appCfg.Language
+		}
+		i18n.SetLang(string(i18n.Resolve(prescannedLang, os.Getenv("ENV_SYNC_LANG"), configLang)))
+		return runValidate(args[1:], printUsage)
+	}
+
 	printVersion := func() {
 		v, c, d := versionInfo()
 		fmt.Printf("env-sync version %s (commit: %s, built: %s)\n", v, c, d)

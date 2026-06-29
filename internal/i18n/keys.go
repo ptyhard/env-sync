@@ -283,6 +283,56 @@ const (
 	// MsgGCPSecretVersionAddFail は Secret バージョン追加失敗（書式: エラー）。
 	MsgGCPSecretVersionAddFail MsgKey = "gcp.secret_version_add_fail"
 
+	// ----- Validate サブコマンド -----
+
+	// MsgValidateHeader は validate のターゲットヘッダ（書式: ターゲットラベル = name / projectId / owner-repo など）。
+	MsgValidateHeader MsgKey = "validate.header"
+	// MsgValidateProviderUnsupported は Validator 未実装 provider のスキップメッセージ（書式: プロバイダー名）。
+	MsgValidateProviderUnsupported MsgKey = "validate.provider_unsupported"
+	// MsgValidateSourceEnv は取得元が環境変数であることを示すラベル。
+	MsgValidateSourceEnv MsgKey = "validate.source_env"
+	// MsgValidateSourceConfig は取得元が config ファイルであることを示すラベル。
+	MsgValidateSourceConfig MsgKey = "validate.source_config"
+	// MsgValidateSourceProjectJSON は取得元が .vercel/project.json であることを示すラベル。
+	MsgValidateSourceProjectJSON MsgKey = "validate.source_project_json"
+	// MsgValidateSourceGitRemote は取得元が git remote であることを示すラベル。
+	MsgValidateSourceGitRemote MsgKey = "validate.source_git_remote"
+	// MsgValidateSourceUnset は値が未設定であることを示すラベル。
+	MsgValidateSourceUnset MsgKey = "validate.source_unset"
+	// MsgValidateTokenMasked はトークンがマスクされていることを示すラベル（書式: 取得元）。
+	MsgValidateTokenMasked MsgKey = "validate.token_masked"
+	// MsgValidateTokenUnset はトークン未設定のラベル。
+	MsgValidateTokenUnset MsgKey = "validate.token_unset"
+	// MsgValidateHTTPStatus は API 到達確認のステータス表示（書式: ステータスコード）。
+	MsgValidateHTTPStatus MsgKey = "validate.http_status"
+	// MsgValidateOK は到達確認成功のラベル。
+	MsgValidateOK MsgKey = "validate.ok"
+	// MsgValidateTokenUnsetSkip はトークン未設定のため API 確認をスキップするメッセージ。
+	MsgValidateTokenUnsetSkip MsgKey = "validate.token_unset_skip"
+	// MsgValidateProjectIDUnsetSkip は projectId 未設定のため API 確認をスキップするメッセージ（Vercel）。
+	MsgValidateProjectIDUnsetSkip MsgKey = "validate.project_id_unset_skip"
+	// MsgValidateRepoUnresolvableSkip は repo 解決失敗のため API 確認をスキップするメッセージ（GitHub）。
+	MsgValidateRepoUnresolvableSkip MsgKey = "validate.repo_unresolvable_skip"
+	// MsgValidateVercelCause404 は Vercel 404 の推定原因。
+	MsgValidateVercelCause404 MsgKey = "validate.vercel_cause_404"
+	// MsgValidateVercelCause401 は Vercel 401 の推定原因。
+	MsgValidateVercelCause401 MsgKey = "validate.vercel_cause_401"
+	// MsgValidateVercelCause403 は Vercel 403 の推定原因。
+	MsgValidateVercelCause403 MsgKey = "validate.vercel_cause_403"
+	// MsgValidateGitHubCause404 は GitHub 404 の推定原因。
+	MsgValidateGitHubCause404 MsgKey = "validate.github_cause_404"
+	// MsgValidateGitHubCause401 は GitHub 401 の推定原因。
+	MsgValidateGitHubCause401 MsgKey = "validate.github_cause_401"
+	// MsgValidateGitHubCause403 は GitHub 403 の推定原因。
+	MsgValidateGitHubCause403 MsgKey = "validate.github_cause_403"
+	// MsgValidateResult は検証結果サマリ（書式: 成功数, 失敗数）。
+	MsgValidateResult MsgKey = "validate.result"
+	// MsgValidateVercelProjectID は Vercel プロジェクト ID の表示（書式: ID, 取得元）。
+	MsgValidateVercelProjectID MsgKey = "validate.vercel_project_id"
+	// MsgValidateVercelTeamID は Vercel チーム ID の表示（書式: ID or 未設定ラベル, 取得元）。
+	MsgValidateVercelTeamID MsgKey = "validate.vercel_team_id"
+	// MsgValidateGitHubRepo は GitHub リポジトリの表示（書式: owner/repo, 取得元）。
+	MsgValidateGitHubRepo MsgKey = "validate.github_repo"
 	// ----- Sync / Entry 解決 -----
 
 	// MsgDefaultsProviderInvalid は defaults.provider の不正値エラー（書式: 値, 候補一覧）。

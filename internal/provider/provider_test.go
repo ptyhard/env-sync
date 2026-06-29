@@ -107,3 +107,30 @@ func (m *mockProvider) Name() string { return m.name }
 func (m *mockProvider) Sync(opts provider.Options, entries []provider.Entry) error {
 	return m.syncFn(opts, entries)
 }
+
+// TestValidator_OptionalInterface は Validator インターフェースの型アサーションが機能することを確認する。
+// Validator は任意インターフェースなので、実装しない Provider は型アサーションが false になる。
+func TestValidator_OptionalInterface(t *testing.T) {
+	// Validate を実装しない mockProvider は Validator ではない
+	mock := &mockProvider{name: "mock", syncFn: func(_ provider.Options, _ []provider.Entry) error { return nil }}
+	_, ok := any(mock).(provider.Validator)
+	if ok {
+		t.Error("Validator 未実装の mockProvider が Validator として型アサーションされてはいけない")
+	}
+
+	// Validate を実装した mockValidatorProvider は Validator になる
+	v := &mockValidatorProvider{}
+	_, ok = any(v).(provider.Validator)
+	if !ok {
+		t.Error("Validator を実装した mockValidatorProvider が provider.Validator として型アサーションできない")
+	}
+}
+
+// mockValidatorProvider は Validate を実装したテスト専用 Provider。
+type mockValidatorProvider struct{}
+
+func (m *mockValidatorProvider) Name() string                                      { return "mock-validator" }
+func (m *mockValidatorProvider) Sync(_ provider.Options, _ []provider.Entry) error { return nil }
+func (m *mockValidatorProvider) Validate(_ provider.Options, _ []provider.Entry) error {
+	return nil
+}

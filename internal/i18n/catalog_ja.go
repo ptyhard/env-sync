@@ -21,8 +21,9 @@ var jaCatalog = map[MsgKey]string{
 	MsgUsage: `env-sync - 定義ファイルで宣言した環境変数を Vercel または GitHub Actions へ一括登録(同期)する
 
 サブコマンド:
-  init    .env から env-sync.yaml の雛形を生成する
-  setup   認証情報 config ファイル（.env-sync.config.yaml / ~/.config/env-sync/config.yaml）を対話生成する
+  init      .env から env-sync.yaml の雛形を生成する
+  setup     認証情報 config ファイル（.env-sync.config.yaml / ~/.config/env-sync/config.yaml）を対話生成する
+  validate  token / projectId / repo の設定確認と API 到達確認（読み取り専用、書き込みなし）
 
 使い方:
   VERCEL_TOKEN=xxxxx env-sync [オプション]
@@ -274,6 +275,32 @@ YAML スキーマ（定義ファイル env-sync.yaml）:
 	MsgGCPSecretCreateFail:      "Secret の作成に失敗: %s",
 	MsgGCPSecretLabelUpdateFail: "Secret のラベル更新に失敗: %s",
 	MsgGCPSecretVersionAddFail:  "Secret バージョンの追加に失敗: %s",
+
+	// ----- Validate サブコマンド -----
+	MsgValidateHeader:               "=== validate: %s ===\n",
+	MsgValidateProviderUnsupported:  "  [スキップ] %s: validate 未対応\n",
+	MsgValidateSourceEnv:            "環境変数",
+	MsgValidateSourceConfig:         "config ファイル",
+	MsgValidateSourceProjectJSON:    ".vercel/project.json",
+	MsgValidateSourceGitRemote:      "git remote",
+	MsgValidateSourceUnset:          "(未設定)",
+	MsgValidateTokenMasked:          "[設定済み] (取得元: %s)",
+	MsgValidateTokenUnset:           "[未設定]",
+	MsgValidateHTTPStatus:           "HTTP %d",
+	MsgValidateOK:                   "OK",
+	MsgValidateTokenUnsetSkip:       "  token が未設定のため API 確認をスキップします\n",
+	MsgValidateProjectIDUnsetSkip:   "  projectId が未設定のため API 確認をスキップします\n",
+	MsgValidateRepoUnresolvableSkip: "  repo を解決できなかったため API 確認をスキップします\n",
+	MsgValidateVercelCause404:       "  推定原因: teamId 未設定、または projectId が一致しない\n",
+	MsgValidateVercelCause401:       "  推定原因: token が無効\n",
+	MsgValidateVercelCause403:       "  推定原因: token のスコープが不足\n",
+	MsgValidateGitHubCause404:       "  推定原因: リポジトリが存在しない、または private リポジトリへのアクセス不可\n",
+	MsgValidateGitHubCause401:       "  推定原因: token が無効\n",
+	MsgValidateGitHubCause403:       "  推定原因: token のスコープ不足または rate limit\n",
+	MsgValidateResult:               "validate: 成功 %d / 失敗 %d\n",
+	MsgValidateVercelProjectID:      "  projectId : %s (取得元: %s)\n",
+	MsgValidateVercelTeamID:         "  teamId    : %s (取得元: %s)\n",
+	MsgValidateGitHubRepo:           "  repo      : %s (取得元: %s)\n",
 
 	// ----- Sync / Entry 解決 -----
 	MsgDefaultsProviderInvalid: "defaults.provider: 不正な provider 値 %q（%s のいずれかを指定してください）",

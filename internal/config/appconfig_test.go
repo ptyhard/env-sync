@@ -1154,3 +1154,239 @@ func TestResolveGitHubTargets_EmptyRepo_SelectName_Error(t *testing.T) {
 		t.Errorf("エラーメッセージに repo が含まれることを期待: %v", err)
 	}
 }
+
+// --- 取得元(source)付きリゾルバのテスト ---
+
+func TestResolveVercelTokenWithSource_Env(t *testing.T) {
+	t.Setenv("VERCEL_TOKEN", "env-tok")
+	cfg := &config.AppConfig{}
+	cfg.Vercel.Token = "cfg-tok"
+	val, src := cfg.ResolveVercelTokenWithSource()
+	if val != "env-tok" {
+		t.Errorf("val = %q, want env-tok", val)
+	}
+	if src != "env" {
+		t.Errorf("src = %q, want env", src)
+	}
+}
+
+func TestResolveVercelTokenWithSource_Config(t *testing.T) {
+	t.Setenv("VERCEL_TOKEN", "")
+	cfg := &config.AppConfig{}
+	cfg.Vercel.Token = "cfg-tok"
+	val, src := cfg.ResolveVercelTokenWithSource()
+	if val != "cfg-tok" {
+		t.Errorf("val = %q, want cfg-tok", val)
+	}
+	if src != "config" {
+		t.Errorf("src = %q, want config", src)
+	}
+}
+
+func TestResolveVercelTokenWithSource_Unset(t *testing.T) {
+	t.Setenv("VERCEL_TOKEN", "")
+	cfg := &config.AppConfig{}
+	val, src := cfg.ResolveVercelTokenWithSource()
+	if val != "" {
+		t.Errorf("val = %q, want empty", val)
+	}
+	if src != "" {
+		t.Errorf("src = %q, want empty", src)
+	}
+}
+
+func TestResolveVercelProjectIDWithSource_Env(t *testing.T) {
+	t.Setenv("VERCEL_PROJECT_ID", "env-pid")
+	cfg := &config.AppConfig{}
+	cfg.Vercel.ProjectID = "cfg-pid"
+	val, src := cfg.ResolveVercelProjectIDWithSource()
+	if val != "env-pid" {
+		t.Errorf("val = %q, want env-pid", val)
+	}
+	if src != "env" {
+		t.Errorf("src = %q, want env", src)
+	}
+}
+
+func TestResolveVercelProjectIDWithSource_Config(t *testing.T) {
+	t.Setenv("VERCEL_PROJECT_ID", "")
+	cfg := &config.AppConfig{}
+	cfg.Vercel.ProjectID = "cfg-pid"
+	val, src := cfg.ResolveVercelProjectIDWithSource()
+	if val != "cfg-pid" {
+		t.Errorf("val = %q, want cfg-pid", val)
+	}
+	if src != "config" {
+		t.Errorf("src = %q, want config", src)
+	}
+}
+
+func TestResolveVercelTeamIDWithSource_Env(t *testing.T) {
+	t.Setenv("VERCEL_TEAM_ID", "env-team")
+	cfg := &config.AppConfig{}
+	cfg.Vercel.TeamID = "cfg-team"
+	val, src := cfg.ResolveVercelTeamIDWithSource()
+	if val != "env-team" {
+		t.Errorf("val = %q, want env-team", val)
+	}
+	if src != "env" {
+		t.Errorf("src = %q, want env", src)
+	}
+}
+
+func TestResolveGitHubTokenWithSource_Env(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "env-gh-tok")
+	cfg := &config.AppConfig{}
+	cfg.GitHub.Token = "cfg-gh-tok"
+	val, src := cfg.ResolveGitHubTokenWithSource()
+	if val != "env-gh-tok" {
+		t.Errorf("val = %q, want env-gh-tok", val)
+	}
+	if src != "env" {
+		t.Errorf("src = %q, want env", src)
+	}
+}
+
+func TestResolveGitHubTokenWithSource_Config(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	cfg := &config.AppConfig{}
+	cfg.GitHub.Token = "cfg-gh-tok"
+	val, src := cfg.ResolveGitHubTokenWithSource()
+	if val != "cfg-gh-tok" {
+		t.Errorf("val = %q, want cfg-gh-tok", val)
+	}
+	if src != "config" {
+		t.Errorf("src = %q, want config", src)
+	}
+}
+
+func TestResolveGitHubRepoWithSource_Env(t *testing.T) {
+	t.Setenv("GITHUB_REPO", "env/repo")
+	cfg := &config.AppConfig{}
+	cfg.GitHub.Repo = "cfg/repo"
+	val, src := cfg.ResolveGitHubRepoWithSource()
+	if val != "env/repo" {
+		t.Errorf("val = %q, want env/repo", val)
+	}
+	if src != "env" {
+		t.Errorf("src = %q, want env", src)
+	}
+}
+
+func TestResolveGitHubRepoWithSource_Config(t *testing.T) {
+	t.Setenv("GITHUB_REPO", "")
+	cfg := &config.AppConfig{}
+	cfg.GitHub.Repo = "cfg/repo"
+	val, src := cfg.ResolveGitHubRepoWithSource()
+	if val != "cfg/repo" {
+		t.Errorf("val = %q, want cfg/repo", val)
+	}
+	if src != "config" {
+		t.Errorf("src = %q, want config", src)
+	}
+}
+
+func TestResolveVercelTargets_SourceFields_SingleTarget(t *testing.T) {
+	// 単一ターゲット（projects 未定義）の source フィールドが設定されることを確認する
+	t.Setenv("VERCEL_TOKEN", "env-tok")
+	t.Setenv("VERCEL_PROJECT_ID", "env-pid")
+	t.Setenv("VERCEL_TEAM_ID", "")
+	cfg := &config.AppConfig{}
+	cfg.Vercel.TeamID = "cfg-team"
+	targets, err := cfg.ResolveVercelTargets("")
+	if err != nil {
+		t.Fatalf("エラーなしを期待: %v", err)
+	}
+	if len(targets) != 1 {
+		t.Fatalf("targets len = %d, want 1", len(targets))
+	}
+	if targets[0].TokenSource != "env" {
+		t.Errorf("TokenSource = %q, want env", targets[0].TokenSource)
+	}
+	if targets[0].ProjectIDSource != "env" {
+		t.Errorf("ProjectIDSource = %q, want env", targets[0].ProjectIDSource)
+	}
+	if targets[0].TeamIDSource != "config" {
+		t.Errorf("TeamIDSource = %q, want config", targets[0].TeamIDSource)
+	}
+}
+
+func TestResolveVercelTargets_SourceFields_MultiTarget(t *testing.T) {
+	// 複数ターゲット（projects 定義あり）の source フィールドが設定されることを確認する
+	t.Setenv("VERCEL_TOKEN", "env-tok")
+	t.Setenv("VERCEL_PROJECT_ID", "")
+	t.Setenv("VERCEL_TEAM_ID", "")
+	cfg := &config.AppConfig{}
+	cfg.Vercel.Projects = []config.VercelProjectConf{
+		{Name: "app-a", ProjectID: "pid-a"},                     // per-target token なし → env fallback
+		{Name: "app-b", ProjectID: "pid-b", Token: "per-b-tok"}, // per-target token あり
+	}
+	targets, err := cfg.ResolveVercelTargets("")
+	if err != nil {
+		t.Fatalf("エラーなしを期待: %v", err)
+	}
+	if len(targets) != 2 {
+		t.Fatalf("targets len = %d, want 2", len(targets))
+	}
+	// app-a: VERCEL_TOKEN (env) からフォールバック
+	if targets[0].TokenSource != "env" {
+		t.Errorf("targets[0].TokenSource = %q, want env", targets[0].TokenSource)
+	}
+	if targets[0].ProjectIDSource != "config" {
+		t.Errorf("targets[0].ProjectIDSource = %q, want config", targets[0].ProjectIDSource)
+	}
+	// app-b: per-target token は config 由来
+	if targets[1].TokenSource != "config" {
+		t.Errorf("targets[1].TokenSource = %q, want config", targets[1].TokenSource)
+	}
+}
+
+func TestResolveGitHubTargets_SourceFields_SingleTarget(t *testing.T) {
+	// 単一ターゲット（repos 未定義）の source フィールドが設定されることを確認する
+	t.Setenv("GITHUB_TOKEN", "env-gh-tok")
+	t.Setenv("GITHUB_REPO", "")
+	cfg := &config.AppConfig{}
+	cfg.GitHub.Repo = "cfg/repo"
+	targets, err := cfg.ResolveGitHubTargets("")
+	if err != nil {
+		t.Fatalf("エラーなしを期待: %v", err)
+	}
+	if len(targets) != 1 {
+		t.Fatalf("targets len = %d, want 1", len(targets))
+	}
+	if targets[0].TokenSource != "env" {
+		t.Errorf("TokenSource = %q, want env", targets[0].TokenSource)
+	}
+	if targets[0].RepoSource != "config" {
+		t.Errorf("RepoSource = %q, want config", targets[0].RepoSource)
+	}
+}
+
+func TestResolveGitHubTargets_SourceFields_MultiTarget(t *testing.T) {
+	// 複数ターゲット（repos 定義あり）の source フィールドが設定されることを確認する
+	t.Setenv("GITHUB_TOKEN", "env-gh-tok")
+	t.Setenv("GITHUB_REPO", "")
+	cfg := &config.AppConfig{}
+	cfg.GitHub.Repos = []config.GitHubRepoConf{
+		{Name: "frontend", Repo: "org/frontend"},
+		{Name: "backend", Repo: "org/backend", Token: "per-backend-tok"},
+	}
+	targets, err := cfg.ResolveGitHubTargets("")
+	if err != nil {
+		t.Fatalf("エラーなしを期待: %v", err)
+	}
+	if len(targets) != 2 {
+		t.Fatalf("targets len = %d, want 2", len(targets))
+	}
+	// frontend: GITHUB_TOKEN (env) からフォールバック
+	if targets[0].TokenSource != "env" {
+		t.Errorf("targets[0].TokenSource = %q, want env", targets[0].TokenSource)
+	}
+	if targets[0].RepoSource != "config" {
+		t.Errorf("targets[0].RepoSource = %q, want config", targets[0].RepoSource)
+	}
+	// backend: per-target token は config 由来
+	if targets[1].TokenSource != "config" {
+		t.Errorf("targets[1].TokenSource = %q, want config", targets[1].TokenSource)
+	}
+}
