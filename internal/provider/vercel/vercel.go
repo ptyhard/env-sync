@@ -474,8 +474,12 @@ func applyProjectJSONFallback(targets []config.VercelTarget) (usedProjectJSON bo
 		if err := json.Unmarshal(pjText, &pj); err != nil {
 			return false, fmt.Errorf("%s", i18n.T(i18n.MsgVercelProjectJSONParseFail, err))
 		}
-		targets[0].ProjectID = pj.ProjectID
-		targets[0].ProjectIDSource = "project_json"
+		// projectId が実際に含まれている場合のみ ProjectIDSource を更新する。
+		// project.json に projectId フィールドが無い場合は source を "project_json" にしない。
+		if pj.ProjectID != "" {
+			targets[0].ProjectID = pj.ProjectID
+			targets[0].ProjectIDSource = "project_json"
+		}
 		if targets[0].TeamID == "" && pj.OrgID != "" {
 			targets[0].TeamID = pj.OrgID
 			targets[0].TeamIDSource = "project_json"

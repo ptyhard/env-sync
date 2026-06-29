@@ -285,7 +285,7 @@ const (
 
 	// ----- Validate サブコマンド -----
 
-	// MsgValidateHeader は validate の対象プロバイダーヘッダ（書式: プロバイダー名）。
+	// MsgValidateHeader は validate のターゲットヘッダ（書式: ターゲットラベル = name / projectId / owner-repo など）。
 	MsgValidateHeader MsgKey = "validate.header"
 	// MsgValidateProviderUnsupported は Validator 未実装 provider のスキップメッセージ（書式: プロバイダー名）。
 	MsgValidateProviderUnsupported MsgKey = "validate.provider_unsupported"

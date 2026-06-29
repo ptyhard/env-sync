@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"time"
 
 	"github.com/ptyhard/env-sync/internal/config"
 	"github.com/ptyhard/env-sync/internal/i18n"
@@ -39,7 +38,7 @@ func (v *vercelProvider) Validate(opts provider.Options, _ []provider.Entry) err
 		return err
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: httpTimeout}
 	okCount, ngCount := 0, 0
 
 	for _, tgt := range targets {

@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"time"
 
 	"github.com/ptyhard/env-sync/internal/config"
 	"github.com/ptyhard/env-sync/internal/i18n"
@@ -33,7 +32,7 @@ func (g *githubProvider) Validate(opts provider.Options, entries []provider.Entr
 		return err
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: httpTimeout}
 	okCount, ngCount := 0, 0
 
 	for _, tgt := range targets {
