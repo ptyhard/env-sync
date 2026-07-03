@@ -361,3 +361,57 @@ func TestPrescanLang_Empty(t *testing.T) {
 		t.Errorf("PrescanLang(空): got %q, want empty", got)
 	}
 }
+
+// --environments フラグのテスト
+
+// TestParseFlags_Environments_CommaSeparated はカンマ区切りで複数の環境名を解析できること。
+func TestParseFlags_Environments_CommaSeparated(t *testing.T) {
+	opts := config.ParseFlags([]string{"--environments", "staging,preview"}, nil, nil)
+	want := []string{"staging", "preview"}
+	if len(opts.Environments) != len(want) {
+		t.Fatalf("Environments len = %d, want %d: %v", len(opts.Environments), len(want), opts.Environments)
+	}
+	for i, e := range want {
+		if opts.Environments[i] != e {
+			t.Errorf("Environments[%d] = %q, want %q", i, opts.Environments[i], e)
+		}
+	}
+}
+
+// TestParseFlags_Environments_EqualForm は --environments=staging,preview の形式を解析できること。
+func TestParseFlags_Environments_EqualForm(t *testing.T) {
+	opts := config.ParseFlags([]string{"--environments=production"}, nil, nil)
+	if len(opts.Environments) != 1 || opts.Environments[0] != "production" {
+		t.Errorf("Environments = %v, want [production]", opts.Environments)
+	}
+}
+
+// TestParseFlags_Environments_TrimmedSpaces はカンマ区切り値の前後スペースをトリムすること。
+func TestParseFlags_Environments_TrimmedSpaces(t *testing.T) {
+	opts := config.ParseFlags([]string{"--environments", " production , preview "}, nil, nil)
+	want := []string{"production", "preview"}
+	if len(opts.Environments) != len(want) {
+		t.Fatalf("Environments = %v, want %v", opts.Environments, want)
+	}
+	for i, e := range want {
+		if opts.Environments[i] != e {
+			t.Errorf("Environments[%d] = %q, want %q", i, opts.Environments[i], e)
+		}
+	}
+}
+
+// TestParseFlags_Environments_ShortForm は -environments でも動作すること。
+func TestParseFlags_Environments_ShortForm(t *testing.T) {
+	opts := config.ParseFlags([]string{"-environments", "staging"}, nil, nil)
+	if len(opts.Environments) != 1 || opts.Environments[0] != "staging" {
+		t.Errorf("Environments = %v, want [staging]", opts.Environments)
+	}
+}
+
+// TestParseFlags_Environments_EmptyDefault はフラグ未指定のとき Environments が nil であること。
+func TestParseFlags_Environments_EmptyDefault(t *testing.T) {
+	opts := config.ParseFlags([]string{}, nil, nil)
+	if len(opts.Environments) != 0 {
+		t.Errorf("Environments のデフォルト: got %v, want nil/空", opts.Environments)
+	}
+}

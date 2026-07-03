@@ -116,6 +116,49 @@ func ResolveEntries(def config.Definition, envVars map[string]string, defKeys []
 	return entries, nil
 }
 
+// FilterEntriesByEnvironments は filterEnvs（--environments フラグの値）で entries を絞り込む。
+// filterEnvs が空のとき entries をそのまま返す（後方互換）。
+// filterEnvs が非空のとき:
+//   - entry.Environments が nil/空（宣言なし）→ 「全環境」ではなく「宣言なし」とみなしスキップ
+//     （Vercel は envs 空だと暗黙で [production, preview] に書くため、nil のまま通すと
+//     フラグ外環境へ書く事故になる。安全側に倒してスキップする）
+//   - entry.Environments ∩ filterEnvs が空 → スキップ
+//   - 積集合が非空 → entry の Environments を積集合に置き換えて返す
+//
+// 返り値: (filtered []provider.Entry, skippedKeys []string)
+func FilterEntriesByEnvironments(entries []provider.Entry, filterEnvs []string) ([]provider.Entry, []string) {
+	if len(filterEnvs) == 0 {
+		return entries, nil
+	}
+	filterSet := make(map[string]bool, len(filterEnvs))
+	for _, e := range filterEnvs {
+		filterSet[e] = true
+	}
+	filtered := make([]provider.Entry, 0, len(entries))
+	var skipped []string
+	for _, e := range entries {
+		// environments が nil/空 → 宣言なし → filterEnvs 指定時はスキップ
+		if len(e.Environments) == 0 {
+			skipped = append(skipped, e.Key)
+			continue
+		}
+		var intersection []string
+		for _, env := range e.Environments {
+			if filterSet[env] {
+				intersection = append(intersection, env)
+			}
+		}
+		if len(intersection) == 0 {
+			skipped = append(skipped, e.Key)
+			continue
+		}
+		// 積集合で Environments を上書き
+		e.Environments = intersection
+		filtered = append(filtered, e)
+	}
+	return filtered, skipped
+}
+
 // deduplicateProviders は providers スライスから空文字・空白のみの要素を除去し重複を排除する。
 // [vercel, vercel] のような重複指定を正規化し、二重 Sync を防ぐ。
 func deduplicateProviders(providers []string) []string {

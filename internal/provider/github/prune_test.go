@@ -20,7 +20,7 @@ func keepFunc(definedKeys ...string) func(string) bool {
 // --- pruneScopes のテスト ---
 
 func TestPruneScopes_AlwaysIncludesRepoLevel(t *testing.T) {
-	scopes := pruneScopes(nil)
+	scopes := pruneScopes(nil, nil)
 	if len(scopes) != 1 || scopes[0] != "" {
 		t.Errorf("scopes = %v, want [\"\"]（repo レベルは常にスキャン）", scopes)
 	}
@@ -33,7 +33,7 @@ func TestPruneScopes_CollectsUniqueEnvScopes(t *testing.T) {
 		{envScope: "production", entry: provider.Entry{Key: "C"}},
 		{envScope: "staging", entry: provider.Entry{Key: "D"}},
 	}
-	scopes := pruneScopes(tasks)
+	scopes := pruneScopes(tasks, nil)
 	want := []string{"", "production", "staging"}
 	if len(scopes) != len(want) {
 		t.Fatalf("scopes = %v, want %v", scopes, want)
@@ -42,6 +42,49 @@ func TestPruneScopes_CollectsUniqueEnvScopes(t *testing.T) {
 		if scopes[i] != s {
 			t.Errorf("scopes[%d] = %q, want %q", i, scopes[i], s)
 		}
+	}
+}
+
+// --- pruneScopes + filterEnvs のテスト ---
+
+// filterEnvs 指定時は repo レベル("") を除外すること
+func TestPruneScopes_FilterEnvs_ExcludesRepoLevel(t *testing.T) {
+	tasks := []githubTask{
+		{envScope: "", entry: provider.Entry{Key: "A"}},
+		{envScope: "production", entry: provider.Entry{Key: "B"}},
+	}
+	scopes := pruneScopes(tasks, []string{"production"})
+	for _, s := range scopes {
+		if s == "" {
+			t.Errorf("scopes に repo レベル (\"\") が含まれている: %v（filterEnvs 指定時は除外するべき）", scopes)
+		}
+	}
+	if len(scopes) != 1 || scopes[0] != "production" {
+		t.Errorf("scopes = %v, want [production]（指定環境のみ）", scopes)
+	}
+}
+
+// filterEnvs に含まれない named environment はスコープに入らないこと
+func TestPruneScopes_FilterEnvs_OnlyIncludesSpecifiedEnvs(t *testing.T) {
+	tasks := []githubTask{
+		{envScope: "production", entry: provider.Entry{Key: "A"}},
+		{envScope: "staging", entry: provider.Entry{Key: "B"}},
+	}
+	scopes := pruneScopes(tasks, []string{"production"})
+	if len(scopes) != 1 || scopes[0] != "production" {
+		t.Errorf("scopes = %v, want [production]（staging は filterEnvs 外なので除外）", scopes)
+	}
+}
+
+// filterEnvs が空のとき従来の動作（repo レベルを含む全スコープ）を返すこと（後方互換）
+func TestPruneScopes_FilterEnvs_Empty_BackwardCompat(t *testing.T) {
+	tasks := []githubTask{
+		{envScope: "", entry: provider.Entry{Key: "A"}},
+		{envScope: "production", entry: provider.Entry{Key: "B"}},
+	}
+	scopes := pruneScopes(tasks, nil)
+	if len(scopes) != 2 || scopes[0] != "" || scopes[1] != "production" {
+		t.Errorf("scopes = %v, want [\"\", \"production\"]（後方互換）", scopes)
 	}
 }
 

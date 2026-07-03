@@ -3,21 +3,23 @@ package i18n
 // enCatalog は英語メッセージカタログ。
 var enCatalog = map[MsgKey]string{
 	// ----- CLI フラグ共通 -----
-	MsgFlagNeedsValue:      "Error: %s requires a value\n",
-	MsgFlagNeedsNonEmpty:   "Error: %s requires a non-empty value\n",
-	MsgFlagUnknown:         "Error: unknown argument: %s\n",
-	MsgFlagProviderInvalid: "Error: --provider must be one of: %s\n",
-	MsgFlagOrSeparator:     " or ",
+	MsgFlagNeedsValue:          "Error: %s requires a value\n",
+	MsgFlagNeedsNonEmpty:       "Error: %s requires a non-empty value\n",
+	MsgFlagUnknown:             "Error: unknown argument: %s\n",
+	MsgFlagProviderInvalid:     "Error: --provider must be one of: %s\n",
+	MsgFlagOrSeparator:         " or ",
+	MsgInvalidEnvironmentsFlag: "--environments: invalid environment name(s): %s (allowed: %s)",
 
 	// ----- Main / run() -----
-	MsgErrorPrefix:      "Error: %s\n",
-	MsgEnvFileNotFound:  "env file not found: %s",
-	MsgDefFileNotFound:  "definition file not found: %s",
-	MsgEnvFileReadFail:  "failed to read env file: %s",
-	MsgDefFileReadFail:  "failed to read definition file: %s",
-	MsgDefFileYAMLFail:  "failed to parse definition file YAML: %s",
-	MsgSkipNoValueInEnv: "⚠ %s: defined but no value in %s, skipping\n",
-	MsgSkipNotDefined:   "⚠ %s: in %s but not defined, skipping\n",
+	MsgErrorPrefix:               "Error: %s\n",
+	MsgEnvFileNotFound:           "env file not found: %s",
+	MsgDefFileNotFound:           "definition file not found: %s",
+	MsgEnvFileReadFail:           "failed to read env file: %s",
+	MsgDefFileReadFail:           "failed to read definition file: %s",
+	MsgDefFileYAMLFail:           "failed to parse definition file YAML: %s",
+	MsgSkipNoValueInEnv:          "⚠ %s: defined but no value in %s, skipping\n",
+	MsgSkipNotDefined:            "⚠ %s: in %s but not defined, skipping\n",
+	MsgSkipNoMatchingEnvironment: "⚠ %s: no matching environments after --environments filter, skipping\n",
 	MsgUsage: `env-sync - sync environment variables declared in a definition file to Vercel or GitHub Actions
 
 Subcommands:
@@ -38,6 +40,9 @@ Options (sync):
   --dry-run                 show planned entries (new/update) without sending (values not shown)
   --yes, -y                 skip confirmation when updates are included
   --prune                   delete remote variables not in the definition file (also enabled by prune: true in the definition file)
+  --environments <list>     comma-separated list of environments to write to (e.g. staging,preview)
+                            intersects with each variable's declared environments; variables with no matching environment are skipped
+                            when combined with --prune: deletion scope is also limited to the specified environments
   --vercel-project <name>   sync only the named project from config vercel.projects (monorepo)
   --github-repo <name>      sync only the named repo from config github.repos (monorepo)
   --lang <code>             display language (en / ja, default: en)

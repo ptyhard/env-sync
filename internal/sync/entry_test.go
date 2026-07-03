@@ -474,3 +474,87 @@ func TestResolveEntries_VercelProject_Unset(t *testing.T) {
 		t.Errorf("VercelProjects = %v, want [] (未指定なら全ターゲット向け)", entries[0].VercelProjects)
 	}
 }
+
+// FilterEntriesByEnvironments のテスト
+
+// filterEnvs が空のとき entries をそのまま返す（後方互換）
+func TestFilterEntriesByEnvironments_NoFilter_All(t *testing.T) {
+	entries := []provider.Entry{
+		{Key: "FOO", Environments: []string{"production", "preview"}},
+		{Key: "BAR", Environments: []string{"staging"}},
+	}
+	filtered, skipped := FilterEntriesByEnvironments(entries, nil)
+	if len(filtered) != 2 {
+		t.Errorf("filtered len = %d, want 2", len(filtered))
+	}
+	if len(skipped) != 0 {
+		t.Errorf("skipped = %v, want 空", skipped)
+	}
+}
+
+// filterEnvs 指定時、宣言 environments ∩ filterEnvs で絞り込まれること
+func TestFilterEntriesByEnvironments_Intersection(t *testing.T) {
+	entries := []provider.Entry{
+		{Key: "FOO", Environments: []string{"production", "preview", "staging"}},
+	}
+	filtered, skipped := FilterEntriesByEnvironments(entries, []string{"production"})
+	if len(filtered) != 1 {
+		t.Fatalf("filtered len = %d, want 1", len(filtered))
+	}
+	if len(filtered[0].Environments) != 1 || filtered[0].Environments[0] != "production" {
+		t.Errorf("Environments = %v, want [production]（積集合に置き換え）", filtered[0].Environments)
+	}
+	if len(skipped) != 0 {
+		t.Errorf("skipped = %v, want 空（積集合非空なのでスキップなし）", skipped)
+	}
+}
+
+// filterEnvs 指定時、積集合が空の変数はスキップされること
+func TestFilterEntriesByEnvironments_EmptyIntersection_Skipped(t *testing.T) {
+	entries := []provider.Entry{
+		{Key: "FOO", Environments: []string{"production", "staging"}},
+	}
+	filtered, skipped := FilterEntriesByEnvironments(entries, []string{"preview"})
+	if len(filtered) != 0 {
+		t.Errorf("filtered len = %d, want 0（積集合空はスキップ）", len(filtered))
+	}
+	if len(skipped) != 1 || skipped[0] != "FOO" {
+		t.Errorf("skipped = %v, want [FOO]", skipped)
+	}
+}
+
+// filterEnvs 指定時、environments 未宣言（nil）の変数はスキップされること
+func TestFilterEntriesByEnvironments_NilEnvironments_Skipped(t *testing.T) {
+	entries := []provider.Entry{
+		{Key: "FOO", Environments: nil},
+	}
+	filtered, skipped := FilterEntriesByEnvironments(entries, []string{"production"})
+	if len(filtered) != 0 {
+		t.Errorf("filtered len = %d, want 0（宣言なしはフラグ指定時スキップ）", len(filtered))
+	}
+	if len(skipped) != 1 || skipped[0] != "FOO" {
+		t.Errorf("skipped = %v, want [FOO]", skipped)
+	}
+}
+
+// 複数変数混在: 一部スキップ・一部通過
+func TestFilterEntriesByEnvironments_Mixed(t *testing.T) {
+	entries := []provider.Entry{
+		{Key: "A", Environments: []string{"production", "staging"}},
+		{Key: "B", Environments: []string{"preview"}},
+		{Key: "C", Environments: nil},
+	}
+	filtered, skipped := FilterEntriesByEnvironments(entries, []string{"production", "preview"})
+	if len(filtered) != 2 {
+		t.Fatalf("filtered len = %d, want 2: %v", len(filtered), filtered)
+	}
+	if filtered[0].Key != "A" || len(filtered[0].Environments) != 1 || filtered[0].Environments[0] != "production" {
+		t.Errorf("filtered[0] = %v, want A with [production]", filtered[0])
+	}
+	if filtered[1].Key != "B" || len(filtered[1].Environments) != 1 || filtered[1].Environments[0] != "preview" {
+		t.Errorf("filtered[1] = %v, want B with [preview]", filtered[1])
+	}
+	if len(skipped) != 1 || skipped[0] != "C" {
+		t.Errorf("skipped = %v, want [C]（宣言なしはスキップ）", skipped)
+	}
+}

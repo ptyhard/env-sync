@@ -75,12 +75,15 @@
 //	--dry-run                 実際には送信せず、新規/更新の区別を含む登録予定一覧を表示（値は出さない）
 //	--yes, -y                 更新(上書き)を含む場合の確認をスキップして送信
 //	--prune                   定義ファイルに無いリモートの変数を削除する（定義ファイルの prune: true でも有効化可）
+//	--environments <list>     書き込み先環境をカンマ区切りで絞り込む（例: staging,preview）
 package main
 
 import (
 	"fmt"
 	"os"
 	"runtime/debug"
+	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -264,6 +267,25 @@ func run() error {
 		return fmt.Errorf("%s", i18n.T(i18n.MsgDefFileYAMLFail, err))
 	}
 
+	// ---- --environments バリデーション（def パース後。def の Custom Environment 名を許容値に含める） ----
+	if len(opts.Environments) > 0 {
+		allowed := collectAllowedEnvironments(def)
+		var invalid []string
+		for _, e := range opts.Environments {
+			if !allowed[e] {
+				invalid = append(invalid, e)
+			}
+		}
+		if len(invalid) > 0 {
+			allowedSlice := make([]string, 0, len(allowed))
+			for k := range allowed {
+				allowedSlice = append(allowedSlice, k)
+			}
+			sort.Strings(allowedSlice)
+			return fmt.Errorf("%s", i18n.T(i18n.MsgInvalidEnvironmentsFlag, strings.Join(invalid, ", "), strings.Join(allowedSlice, ", ")))
+		}
+	}
+
 	// ---- prune の解決（--prune フラグ または 定義ファイルの prune: true） ----
 	if def.Prune {
 		opts.Prune = true
@@ -299,6 +321,16 @@ func run() error {
 		return err
 	}
 
+	// ---- 環境フィルタ（--environments 指定時）----
+	// DefinedKeys は積集合でフィルタせず全キーを渡す（スキップ変数が prune で誤削除されないため）。
+	if len(opts.Environments) > 0 {
+		var skipped []string
+		entries, skipped = internalsync.FilterEntriesByEnvironments(entries, opts.Environments)
+		for _, k := range skipped {
+			fmt.Fprint(os.Stderr, i18n.T(i18n.MsgSkipNoMatchingEnvironment, k))
+		}
+	}
+
 	// ---- プロバイダーごとに振り分け ----
 	providerEntries := map[string][]provider.Entry{}
 	for _, e := range entries {
@@ -330,4 +362,28 @@ func run() error {
 
 func printUsage() {
 	fmt.Fprint(os.Stderr, i18n.T(i18n.MsgUsage))
+}
+
+// collectAllowedEnvironments は def から --environments バリデーション用の許容環境名セットを返す。
+// production / preview / development は常に許容される。
+// def.Defaults.Environments と各変数の environments に現れる名前（Custom Environment 名）も許容する。
+func collectAllowedEnvironments(def config.Definition) map[string]bool {
+	allowed := map[string]bool{
+		"production":  true,
+		"preview":     true,
+		"development": true,
+	}
+	for _, e := range def.Defaults.Environments {
+		if t := strings.TrimSpace(e); t != "" {
+			allowed[t] = true
+		}
+	}
+	for _, vc := range def.Variables {
+		for _, e := range vc.Environments {
+			if t := strings.TrimSpace(e); t != "" {
+				allowed[t] = true
+			}
+		}
+	}
+	return allowed
 }

@@ -3,21 +3,23 @@ package i18n
 // jaCatalog は日本語メッセージカタログ。
 var jaCatalog = map[MsgKey]string{
 	// ----- CLI フラグ共通 -----
-	MsgFlagNeedsValue:      "エラー: %s には値が必要です\n",
-	MsgFlagNeedsNonEmpty:   "エラー: %s には空でない値が必要です\n",
-	MsgFlagUnknown:         "エラー: 不明な引数: %s\n",
-	MsgFlagProviderInvalid: "エラー: --provider には %s を指定してください\n",
-	MsgFlagOrSeparator:     " または ",
+	MsgFlagNeedsValue:          "エラー: %s には値が必要です\n",
+	MsgFlagNeedsNonEmpty:       "エラー: %s には空でない値が必要です\n",
+	MsgFlagUnknown:             "エラー: 不明な引数: %s\n",
+	MsgFlagProviderInvalid:     "エラー: --provider には %s を指定してください\n",
+	MsgFlagOrSeparator:         " または ",
+	MsgInvalidEnvironmentsFlag: "--environments: 不正な環境名が含まれています: %s（許容値: %s）",
 
 	// ----- Main / run() -----
-	MsgErrorPrefix:      "エラー: %s\n",
-	MsgEnvFileNotFound:  "env ファイルが見つかりません: %s",
-	MsgDefFileNotFound:  "定義ファイルが見つかりません: %s",
-	MsgEnvFileReadFail:  "env ファイルの読み込みに失敗: %s",
-	MsgDefFileReadFail:  "定義ファイルの読み込みに失敗: %s",
-	MsgDefFileYAMLFail:  "定義ファイルの YAML パースに失敗: %s",
-	MsgSkipNoValueInEnv: "⚠ %s: 定義にあるが %s に値が無いためスキップ\n",
-	MsgSkipNotDefined:   "⚠ %s: %s にあるが定義に無いためスキップ\n",
+	MsgErrorPrefix:               "エラー: %s\n",
+	MsgEnvFileNotFound:           "env ファイルが見つかりません: %s",
+	MsgDefFileNotFound:           "定義ファイルが見つかりません: %s",
+	MsgEnvFileReadFail:           "env ファイルの読み込みに失敗: %s",
+	MsgDefFileReadFail:           "定義ファイルの読み込みに失敗: %s",
+	MsgDefFileYAMLFail:           "定義ファイルの YAML パースに失敗: %s",
+	MsgSkipNoValueInEnv:          "⚠ %s: 定義にあるが %s に値が無いためスキップ\n",
+	MsgSkipNotDefined:            "⚠ %s: %s にあるが定義に無いためスキップ\n",
+	MsgSkipNoMatchingEnvironment: "⚠ %s: --environments フィルタ後に一致する環境が無いためスキップ\n",
 	MsgUsage: `env-sync - 定義ファイルで宣言した環境変数を Vercel または GitHub Actions へ一括登録(同期)する
 
 サブコマンド:
@@ -38,6 +40,9 @@ var jaCatalog = map[MsgKey]string{
   --dry-run                 送信せず新規/更新の区別を含む登録予定一覧を表示（値は出さない）
   --yes, -y                 更新(上書き)を含む場合の確認をスキップして送信
   --prune                   定義ファイルに無いリモートの変数を削除する（定義ファイルの prune: true でも有効化可）
+  --environments <list>     書き込み先環境をカンマ区切りで絞り込む（例: staging,preview）
+                            各変数の宣言済み environments との積集合を取る。一致なしはスキップ（エラーにしない）
+                            --prune 併用時: 削除スコープも指定環境に限定する
   --vercel-project <name>   config の vercel.projects から指定名のプロジェクトのみ同期（モノレポ対応）
   --github-repo <name>      config の github.repos から指定名のリポジトリのみ同期（モノレポ対応）
   --lang <code>             表示言語（en / ja、デフォルト en）

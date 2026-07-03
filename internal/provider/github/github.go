@@ -107,13 +107,32 @@ type githubPruneTarget struct {
 }
 
 // pruneScopes は prune でスキャンする envScope の一覧を返す純粋関数。
-// リポジトリレベル("")は常に含め、tasks に現れる named environment を重複なく加える。
+// filterEnvs が空のとき: リポジトリレベル("") を常に含め、tasks に現れる named environment を重複なく加える。
+// filterEnvs が非空のとき: リポジトリレベル("") を除外し（指定外環境の変数を誤削除しないため）、
+// tasks に現れ、かつ filterEnvs に含まれる named environment のみを加える。
 // 定義ファイルに現れない environment はスキャンしない（削除対象の探索範囲を管理対象に限定する）。
-func pruneScopes(tasks []githubTask) []string {
-	scopes := []string{""}
-	seen := map[string]bool{"": true}
+func pruneScopes(tasks []githubTask, filterEnvs []string) []string {
+	if len(filterEnvs) == 0 {
+		// フラグ未指定: 従来通り repo レベルを含む全スコープ
+		scopes := []string{""}
+		seen := map[string]bool{"": true}
+		for _, t := range tasks {
+			if !seen[t.envScope] {
+				seen[t.envScope] = true
+				scopes = append(scopes, t.envScope)
+			}
+		}
+		return scopes
+	}
+	// --environments 指定時: repo レベル("") を除外し、指定環境のみを対象にする
+	filterSet := make(map[string]bool, len(filterEnvs))
+	for _, e := range filterEnvs {
+		filterSet[e] = true
+	}
+	var scopes []string
+	seen := make(map[string]bool)
 	for _, t := range tasks {
-		if !seen[t.envScope] {
+		if t.envScope != "" && filterSet[t.envScope] && !seen[t.envScope] {
 			seen[t.envScope] = true
 			scopes = append(scopes, t.envScope)
 		}
@@ -349,7 +368,7 @@ func (g *githubProvider) Sync(opts provider.Options, entries []provider.Entry) e
 			}
 			// prune 削除対象の収集（一覧取得に失敗した場合は削除をスキップする安全側フォールバック）
 			if opts.Prune {
-				pt, err := collectGitHubPrune(client, targetToken, ownerStr, repoStr, pruneScopes(tasks), pruneKeep)
+				pt, err := collectGitHubPrune(client, targetToken, ownerStr, repoStr, pruneScopes(tasks, opts.Environments), pruneKeep)
 				if err == nil {
 					pruneTargets = pt
 				} else {

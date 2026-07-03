@@ -23,6 +23,10 @@ type Options struct {
 	DefinedKeys []string
 	// PruneExclude は prune で削除しないキー名の glob パターン一覧（定義ファイルの prune_exclude）。
 	PruneExclude []string
+	// Environments は --environments フラグで指定した書き込み先環境の絞り込みリスト。
+	// 空のとき絞り込みなし（従来通り宣言済み全環境へ書き込む）。
+	// 非空のとき、各変数の宣言済み environments との積集合が書き込み先になる。
+	Environments []string
 }
 
 // PruneKeep は prune 時に key を保持すべきか（削除しないか）を判定する関数を返す。

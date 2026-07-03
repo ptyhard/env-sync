@@ -129,6 +129,10 @@ func ParseFlags(argv []string, printUsageFn func(), versionFn func()) provider.O
 				os.Exit(1)
 			}
 			opts.Provider = v
+		case arg == "--environments" || arg == "-environments":
+			opts.Environments = splitEnvironments(next())
+		case strings.HasPrefix(arg, "--environments="):
+			opts.Environments = splitEnvironments(strings.TrimPrefix(arg, "--environments="))
 		case arg == "--vercel-project" || arg == "-vercel-project":
 			opts.VercelProject = next()
 		case strings.HasPrefix(arg, "--vercel-project="):
@@ -162,4 +166,17 @@ func ParseFlags(argv []string, printUsageFn func(), versionFn func()) provider.O
 		}
 	}
 	return opts
+}
+
+// splitEnvironments はカンマ区切りの環境名文字列を分割・トリム・空要素除去して返す。
+// --environments フラグの値の解析に使用する。
+func splitEnvironments(s string) []string {
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			result = append(result, t)
+		}
+	}
+	return result
 }
