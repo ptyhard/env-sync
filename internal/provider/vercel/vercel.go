@@ -111,6 +111,26 @@ func (v *vercelProvider) Sync(opts provider.Options, entries []provider.Entry) e
 			}
 		}
 
+		// prune の環境フィルタに Custom Environment のIDが必要な場合に slug→ID マップを取得する。
+		// filterEnvs に標準環境名以外（Custom Environment slug）が含まれる場合のみ API を呼ぶ。
+		// dry-run でも prune プレビューに使うため DryRun を条件に含めない（read-only GET なので安全）。
+		var slugToIDForPrune map[string]string
+		if opts.Prune && len(opts.Environments) > 0 && tgt.Token != "" {
+			hasCustomEnv := false
+			for _, e := range opts.Environments {
+				if !stdVercelEnvNames[e] {
+					hasCustomEnv = true
+					break
+				}
+			}
+			if hasCustomEnv {
+				if m, fetchErr := vercelFetchCustomEnvironments(client, tgt.Token, tgt.ProjectID, tgt.TeamID); fetchErr == nil {
+					slugToIDForPrune = m
+				}
+				// 取得失敗時は slugToIDForPrune = nil のまま（custom env フィルタなし、安全側）
+			}
+		}
+
 		// 既存 envs を問い合わせて新規/更新を分類し、prune 対象を計算する（結果を保存して後で再利用）
 		var classified []classifiedVercelItem
 		if tgt.Token != "" {
@@ -118,7 +138,7 @@ func (v *vercelProvider) Sync(opts provider.Options, entries []provider.Entry) e
 			if err == nil {
 				classified = classifyVercelItems(items, existingKeySet(envs))
 				if opts.Prune {
-					perTargetPrune[i] = computeVercelPrune(envs, pruneKeep)
+					perTargetPrune[i] = computeVercelPrune(envs, pruneKeep, opts.Environments, slugToIDForPrune)
 				}
 			} else {
 				// API 失敗時は classified = nil のまま（確認スキップしない安全側フォールバック）。
@@ -386,6 +406,10 @@ type vercelEnv struct {
 	Key    string   `json:"key"`
 	Type   string   `json:"type"`
 	Target []string `json:"target"`
+	// CustomEnvironmentIDs は Custom Environment（staging 等）の ID リスト。
+	// 標準環境（production/preview/development）は Target に入り、
+	// Custom Environment は Target が空になり CustomEnvironmentIDs に ID が入る。
+	CustomEnvironmentIDs []string `json:"customEnvironmentIds"`
 	// ConfigurationID が非空の変数はインテグレーション（Blob Store 等）が作成・管理している。
 	ConfigurationID string `json:"configurationId"`
 	// System が true の変数は Vercel が自動提供するシステム変数。
@@ -442,6 +466,13 @@ func existingKeySet(envs []vercelEnv) map[string]bool {
 	return existing
 }
 
+// stdVercelEnvNames は Vercel の標準環境名セット（Target フィールドに入る値）。
+var stdVercelEnvNames = map[string]bool{
+	"production":  true,
+	"preview":     true,
+	"development": true,
+}
+
 // computeVercelPrune は既存 envs のうち定義ファイルに無いレコードを削除対象として返す純粋関数。
 // 以下は env-sync の管理外とみなし削除対象から除外する:
 //   - システム変数（system=true または type=system）
@@ -449,15 +480,59 @@ func existingKeySet(envs []vercelEnv) map[string]bool {
 //   - ID が空のレコード（削除 URL を組み立てられないため安全側に倒して除外）
 //
 // keep は Options.PruneKeep が返す保持判定（定義済みキー + prune_exclude パターン）。
-func computeVercelPrune(envs []vercelEnv, keep func(key string) bool) []vercelEnv {
+// filterEnvs が非空のとき、レコードの全環境（Target + CustomEnvironmentIDs）が
+// filterEnvs の範囲内に収まる場合のみ削除対象にする（部分的でも範囲外を含むレコードは保持）。
+// slugToID は Custom Environment の slug→ID マップ（filterEnvs に custom 名が含まれる場合に使用）。
+func computeVercelPrune(envs []vercelEnv, keep func(key string) bool, filterEnvs []string, slugToID map[string]string) []vercelEnv {
 	var prune []vercelEnv
 	for _, e := range envs {
 		if e.ID == "" || e.System || e.Type == "system" || e.ConfigurationID != "" || keep(e.Key) {
 			continue
 		}
+		// --environments 指定時: 指定環境内に完全に収まるレコードのみ削除対象にする
+		if len(filterEnvs) > 0 && !vercelEnvWithinFilter(e, filterEnvs, slugToID) {
+			continue
+		}
 		prune = append(prune, e)
 	}
 	return prune
+}
+
+// vercelEnvWithinFilter は vercelEnv のすべての環境（Target + CustomEnvironmentIDs）が
+// filterEnvs の範囲内かどうかを確認する純粋関数。
+// true → 指定環境内に完全に収まる（削除対象候補）
+// false → 指定環境外の環境を含む、または Target/CustomEnvironmentIDs が両方空（保持）
+func vercelEnvWithinFilter(e vercelEnv, filterEnvs []string, slugToID map[string]string) bool {
+	// Target と CustomEnvironmentIDs が両方空 → スコープ不明 → 安全側に倒して保持（削除しない）
+	if len(e.Target) == 0 && len(e.CustomEnvironmentIDs) == 0 {
+		return false
+	}
+	// 標準環境フィルタセット
+	filterStd := make(map[string]bool, len(filterEnvs))
+	// Custom Environment ID フィルタセット（slugToID から変換）
+	filterCustomIDs := make(map[string]bool)
+	for _, f := range filterEnvs {
+		if stdVercelEnvNames[f] {
+			filterStd[f] = true
+		} else if slugToID != nil {
+			if id, ok := slugToID[f]; ok {
+				filterCustomIDs[id] = true
+			}
+		}
+	}
+	// Target の全環境がフィルタ内か確認
+	for _, t := range e.Target {
+		if !filterStd[t] {
+			return false
+		}
+	}
+	// CustomEnvironmentIDs の全 ID がフィルタ内か確認
+	for _, id := range e.CustomEnvironmentIDs {
+		if !filterCustomIDs[id] {
+			return false
+		}
+	}
+	return true
 }
 
 // deleteVercelEnvs は prune 対象の環境変数レコードを 1 件ずつ削除し、成功数・失敗数を返す。

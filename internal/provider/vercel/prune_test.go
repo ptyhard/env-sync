@@ -21,7 +21,7 @@ func TestComputeVercelPrune_UndefinedKeyIsPruned(t *testing.T) {
 		{ID: "id1", Key: "DEFINED_KEY"},
 		{ID: "id2", Key: "STALE_KEY"},
 	}
-	got := computeVercelPrune(envs, keepFunc("DEFINED_KEY"))
+	got := computeVercelPrune(envs, keepFunc("DEFINED_KEY"), nil, nil)
 	if len(got) != 1 || got[0].Key != "STALE_KEY" {
 		t.Errorf("prune 対象 = %v, want [STALE_KEY]", got)
 	}
@@ -34,7 +34,7 @@ func TestComputeVercelPrune_SkipsSystemAndIntegration(t *testing.T) {
 		{ID: "id3", Key: "BLOB_READ_WRITE_TOKEN", ConfigurationID: "icfg_12345"}, // インテグレーション（Blob Store 等）
 		{ID: "id4", Key: "STALE_KEY"},
 	}
-	got := computeVercelPrune(envs, keepFunc())
+	got := computeVercelPrune(envs, keepFunc(), nil, nil)
 	if len(got) != 1 || got[0].Key != "STALE_KEY" {
 		t.Errorf("prune 対象 = %v, want [STALE_KEY]（system / インテグレーション由来は除外）", got)
 	}
@@ -46,7 +46,7 @@ func TestComputeVercelPrune_MultipleRecordsSameKey(t *testing.T) {
 		{ID: "id1", Key: "STALE_KEY", Target: []string{"production"}},
 		{ID: "id2", Key: "STALE_KEY", Target: []string{"preview"}},
 	}
-	got := computeVercelPrune(envs, keepFunc())
+	got := computeVercelPrune(envs, keepFunc(), nil, nil)
 	if len(got) != 2 {
 		t.Errorf("prune 対象件数 = %d, want 2（レコード単位で削除）", len(got))
 	}
@@ -58,7 +58,7 @@ func TestComputeVercelPrune_SkipsEmptyID(t *testing.T) {
 		{ID: "", Key: "NO_ID_KEY"},
 		{ID: "id1", Key: "STALE_KEY"},
 	}
-	got := computeVercelPrune(envs, keepFunc())
+	got := computeVercelPrune(envs, keepFunc(), nil, nil)
 	if len(got) != 1 || got[0].Key != "STALE_KEY" {
 		t.Errorf("prune 対象 = %v, want [STALE_KEY]（ID 空は除外）", got)
 	}
@@ -66,8 +66,74 @@ func TestComputeVercelPrune_SkipsEmptyID(t *testing.T) {
 
 func TestComputeVercelPrune_AllDefined_Empty(t *testing.T) {
 	envs := []vercelEnv{{ID: "id1", Key: "FOO"}}
-	if got := computeVercelPrune(envs, keepFunc("FOO")); len(got) != 0 {
+	if got := computeVercelPrune(envs, keepFunc("FOO"), nil, nil); len(got) != 0 {
 		t.Errorf("prune 対象 = %v, want 空", got)
+	}
+}
+
+// --- computeVercelPrune + filterEnvs のテスト ---
+
+// filterEnvs 指定時、Target が指定環境のみからなるレコードのみ削除対象になること
+func TestComputeVercelPrune_FilterEnvs_DeletesIfAllTargetInFilter(t *testing.T) {
+	envs := []vercelEnv{
+		{ID: "id1", Key: "STALE_KEY", Target: []string{"production"}},
+		{ID: "id2", Key: "STALE_KEY", Target: []string{"preview"}},
+		{ID: "id3", Key: "STALE_KEY", Target: []string{"staging"}},
+	}
+	// filterEnvs = ["production"] → production のみのレコードが削除対象
+	got := computeVercelPrune(envs, keepFunc(), []string{"production"}, nil)
+	if len(got) != 1 || got[0].ID != "id1" {
+		t.Errorf("prune 対象 = %v, want [id1(production)]（指定環境内レコードのみ）", got)
+	}
+}
+
+// filterEnvs 指定時、Target が指定環境外を含むレコードは保持されること（削除されない）
+func TestComputeVercelPrune_FilterEnvs_KeepsIfTargetHasExternalEnv(t *testing.T) {
+	envs := []vercelEnv{
+		// production + preview の複合レコード: filterEnvs=["production"] だと preview が範囲外 → 保持
+		{ID: "id1", Key: "STALE_KEY", Target: []string{"production", "preview"}},
+	}
+	got := computeVercelPrune(envs, keepFunc(), []string{"production"}, nil)
+	if len(got) != 0 {
+		t.Errorf("prune 対象 = %v, want 空（指定外環境を含む複合レコードは保持）", got)
+	}
+}
+
+// filterEnvs 指定時、Target と CustomEnvironmentIDs が両方空のレコードは保持されること
+func TestComputeVercelPrune_FilterEnvs_KeepsEmptyScopeRecord(t *testing.T) {
+	envs := []vercelEnv{
+		{ID: "id1", Key: "STALE_KEY", Target: nil, CustomEnvironmentIDs: nil},
+	}
+	got := computeVercelPrune(envs, keepFunc(), []string{"production"}, nil)
+	if len(got) != 0 {
+		t.Errorf("prune 対象 = %v, want 空（スコープ不明レコードは安全側に保持）", got)
+	}
+}
+
+// filterEnvs 未指定時は従来通りすべての定義外レコードが削除対象になること（後方互換）
+func TestComputeVercelPrune_FilterEnvs_NilFilter_BackwardCompat(t *testing.T) {
+	envs := []vercelEnv{
+		{ID: "id1", Key: "STALE_KEY", Target: []string{"production", "preview"}},
+		{ID: "id2", Key: "STALE_KEY2", Target: []string{"staging"}},
+	}
+	got := computeVercelPrune(envs, keepFunc(), nil, nil)
+	if len(got) != 2 {
+		t.Errorf("prune 対象件数 = %d, want 2（filterEnvs 未指定時は全レコード対象）", len(got))
+	}
+}
+
+// filterEnvs に Custom Environment slug が含まれる場合、slugToID で ID 解決して比較すること
+func TestComputeVercelPrune_FilterEnvs_CustomEnvByID(t *testing.T) {
+	envs := []vercelEnv{
+		// custom env ID が "env_staging123" → filterEnvs="staging" で slugToID["staging"]="env_staging123" ならば削除対象
+		{ID: "id1", Key: "STALE_KEY", Target: nil, CustomEnvironmentIDs: []string{"env_staging123"}},
+		// custom env ID が "env_other" → filterEnvs に含まれない → 保持
+		{ID: "id2", Key: "STALE_KEY2", Target: nil, CustomEnvironmentIDs: []string{"env_other"}},
+	}
+	slugToID := map[string]string{"staging": "env_staging123"}
+	got := computeVercelPrune(envs, keepFunc(), []string{"staging"}, slugToID)
+	if len(got) != 1 || got[0].ID != "id1" {
+		t.Errorf("prune 対象 = %v, want [id1(staging custom env)]", got)
 	}
 }
 

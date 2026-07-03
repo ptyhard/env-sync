@@ -342,6 +342,42 @@ EOF
 env-sync --env .env.production
 ```
 
+### `--environments` で書き込み先環境を限定する
+
+`env-sync.yaml` 1 本のまま、同期実行時に `--environments` で書き込み先を絞り込めます。
+
+```yaml
+# env-sync.yaml
+variables:
+  DATABASE_URL:
+    secret: true
+    environments: [production, staging, preview]
+  API_KEY:
+    secret: true
+    environments: [production]
+  DEBUG_MODE:
+    secret: false
+    environments: [staging, preview]
+```
+
+```bash
+# production のみに同期（environments に production が含まれない変数はスキップ）
+env-sync --env .env.production --def env-sync.yaml --environments production
+
+# staging と preview のみに同期
+env-sync --env .env.staging --def env-sync.yaml --environments staging,preview
+
+# prune との組み合わせ（削除スコープも staging に限定）
+env-sync --env .env.staging --def env-sync.yaml --environments staging --prune
+```
+
+- 変数の `environments` と `--environments` の積集合が空になる変数はスキップされます（stderr に警告を出力）。
+- 定義ファイルで `environments` を**宣言していない**変数も `--environments` 指定時はスキップされます（積集合を取れる宣言環境が存在しないため）。
+- **全変数がスキップされた場合**、どのプロバイダーへの送信も行われず、prune も実行されずに exit 0 で正常終了します。
+- `--environments` に指定できる名前は、定義ファイルの `environments` フィールドに存在する値、または標準の `production` / `preview` / `development` です。不正な名前が含まれる場合はエラーで終了（exit 1）します。
+- 環境名は**大文字小文字を区別します** — `env-sync.yaml` の宣言と完全に一致する必要があります。
+- **GCP**: GCP Secret に環境スコープの概念はありません。フィルタを通過した変数は引き続き同期され、`managed-by=env-sync` ラベルが付与・更新される副作用があります。`--prune` と組み合わせた場合、GCP の prune スコープは `--environments` で絞られません（`managed-by=env-sync` ラベル付き Secret が全件 prune 対象になります）。
+
 ### 環境変数参照 `${VAR}` / `${VAR:-default}`
 
 config の値に環境変数参照を書くことができます（平文トークンを config ファイルに書きたくない場合に便利です）。
@@ -446,6 +482,7 @@ variables:
 | `--dry-run` | – | 送信せず新規/更新の区別を含む登録予定一覧を表示 |
 | `--yes` / `-y` | – | 更新(上書き)がある場合の確認をスキップ |
 | `--prune` | – | 定義ファイルに無いリモートの変数を削除（定義ファイルの `prune: true` でも有効化可） |
+| `--environments <list>` | – | 書き込み先環境をカンマ区切りで指定（例 `staging,preview`）。各変数の `environments` との積集合が空の変数はスキップ。`--prune` と併用すると削除スコープも指定環境に限定される |
 | `--force` | – | `init` 時に既存の def ファイルを上書きする |
 | `VERCEL_TOKEN` | ◯(Vercel) | Vercel アクセストークン（dry-run 時は不要） |
 | `VERCEL_PROJECT_ID` | △(Vercel) | プロジェクト ID。未指定なら config ファイルまたは `.vercel/project.json` から自動取得 |

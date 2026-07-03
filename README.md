@@ -342,6 +342,42 @@ EOF
 env-sync --env .env.production
 ```
 
+### Using `--environments` to Scope Writes to Specific Environments
+
+With a single `env-sync.yaml` definition file, you can target different environments at sync time using `--environments`.
+
+```yaml
+# env-sync.yaml
+variables:
+  DATABASE_URL:
+    secret: true
+    environments: [production, staging, preview]
+  API_KEY:
+    secret: true
+    environments: [production]
+  DEBUG_MODE:
+    secret: false
+    environments: [staging, preview]
+```
+
+```bash
+# Sync only to production (variables with no 'production' in environments are skipped)
+env-sync --env .env.production --def env-sync.yaml --environments production
+
+# Sync only to staging and preview
+env-sync --env .env.staging --def env-sync.yaml --environments staging,preview
+
+# Prune + limit deletion scope to staging only
+env-sync --env .env.staging --def env-sync.yaml --environments staging --prune
+```
+
+- Variables whose declared `environments` have **no overlap** with `--environments` are skipped (warning to stderr).
+- Variables that have **no `environments` declared** in the definition file are also skipped when `--environments` is specified (they have no declared environments to intersect with).
+- If **all variables are skipped**, no changes are sent to any provider and prune is also skipped — the tool exits successfully with code 0.
+- `--environments` must contain names that appear in `environments` fields of the definition file, or the standard values `production` / `preview` / `development`. An invalid name causes an error and exits with code 1.
+- Environment names are **case-sensitive** — they must match the declaration in `env-sync.yaml` exactly.
+- **GCP**: GCP Secrets have no per-environment scope. Variables that pass the filter will still have the `managed-by=env-sync` label applied/updated as a side effect of syncing. When `--prune` is combined with `--environments`, GCP prune scope is not narrowed (all `managed-by=env-sync` secrets are considered for pruning).
+
 ### Environment Variable References `${VAR}` / `${VAR:-default}`
 
 Config values can include environment variable references (useful for avoiding plaintext tokens in config files).
@@ -446,6 +482,7 @@ Safety behavior:
 | `--dry-run` | – | Show planned registrations with new/update classification without sending |
 | `--yes` / `-y` | – | Skip confirmation when updates (overwrites) exist |
 | `--prune` | – | Delete remote variables not in the definition file (also enabled by `prune: true` in the definition file) |
+| `--environments <list>` | – | Comma-separated list of environments to write to (e.g. `staging,preview`). Intersects with each variable's declared `environments`; variables with no overlap are skipped. When combined with `--prune`, deletion scope is also limited to the specified environments |
 | `--force` | – | Overwrite existing def file during `init` |
 | `VERCEL_TOKEN` | Yes (Vercel) | Vercel access token (not required for dry-run) |
 | `VERCEL_PROJECT_ID` | Conditional (Vercel) | Project ID. Auto-detected from config file or `.vercel/project.json` if unset |

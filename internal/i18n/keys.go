@@ -19,6 +19,9 @@ const (
 	MsgFlagProviderInvalid MsgKey = "flag.provider_invalid"
 	// MsgFlagOrSeparator はプロバイダ名一覧を結合するセパレータ。
 	MsgFlagOrSeparator MsgKey = "flag.or_separator"
+	// MsgInvalidEnvironmentsFlag は --environments に不正な環境名が指定されたときのエラー
+	// （書式: 不正値一覧, 許容値一覧）。
+	MsgInvalidEnvironmentsFlag MsgKey = "flag.invalid_environments"
 
 	// ----- Main / run() -----
 
@@ -38,6 +41,9 @@ const (
 	MsgSkipNoValueInEnv MsgKey = "skip.no_value_in_env"
 	// MsgSkipNotDefined は env にあるが定義にないキーのスキップ警告（書式: キー名, envファイル名）。
 	MsgSkipNotDefined MsgKey = "skip.not_defined"
+	// MsgSkipNoMatchingEnvironment は --environments 指定時に積集合が空になった変数のスキップ警告
+	// （書式: 変数名）。
+	MsgSkipNoMatchingEnvironment MsgKey = "skip.no_matching_env"
 	// MsgUsage は --help で表示する全体使用方法テキスト（書式引数なし）。
 	MsgUsage MsgKey = "usage"
 
