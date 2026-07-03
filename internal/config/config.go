@@ -130,9 +130,19 @@ func ParseFlags(argv []string, printUsageFn func(), versionFn func()) provider.O
 			}
 			opts.Provider = v
 		case arg == "--environments" || arg == "-environments":
-			opts.Environments = splitEnvironments(next())
+			v := splitEnvironments(next())
+			if len(v) == 0 {
+				fmt.Fprint(os.Stderr, i18n.T(i18n.MsgFlagNeedsNonEmpty, "--environments"))
+				os.Exit(1)
+			}
+			opts.Environments = v
 		case strings.HasPrefix(arg, "--environments="):
-			opts.Environments = splitEnvironments(strings.TrimPrefix(arg, "--environments="))
+			v := splitEnvironments(strings.TrimPrefix(arg, "--environments="))
+			if len(v) == 0 {
+				fmt.Fprint(os.Stderr, i18n.T(i18n.MsgFlagNeedsNonEmpty, "--environments"))
+				os.Exit(1)
+			}
+			opts.Environments = v
 		case arg == "--vercel-project" || arg == "-vercel-project":
 			opts.VercelProject = next()
 		case strings.HasPrefix(arg, "--vercel-project="):

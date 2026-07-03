@@ -38,7 +38,7 @@
 #
 #   --environments <list>  （CLI フラグ。このファイルには書かない）
 #           カンマ区切りで書き込み先環境を実行時に絞り込む（例: --environments staging,preview）。
-#           各変数の environments との積集合を取り、重複が無い変数はスキップ（stderr に警告）。
+#           各変数の environments との積集合を取り、積集合が空の変数はスキップ（stderr に警告）。
 #           environments を宣言していない変数も --environments 指定時はスキップされる。
 #           全変数がスキップされた場合は prune も実行されず exit 0 で正常終了する。
 #           --prune と組み合わせると削除スコープも指定環境に限定される。
