@@ -625,7 +625,7 @@ Safety behavior:
 | `GITHUB_TOKEN` | Yes (GitHub) | GitHub access token (not required for dry-run) |
 | `GITHUB_REPO` | – (GitHub) | `owner/repo` format. Auto-detected from config file or `git remote origin` if unset |
 | `CLOUDFLARE_API_TOKEN` | Yes (Cloudflare) | API token with the Workers Scripts:Edit permission (not required for dry-run) |
-| `CLOUDFLARE_ACCOUNT_ID` | Yes (Cloudflare) | Target account ID. Falls back to `cloudflare.account_id` in the config file |
+| `CLOUDFLARE_ACCOUNT_ID` | Yes (Cloudflare) | Target account ID. Falls back to `cloudflare.account_id` in the config file. Not required for dry-run, but without it the new/update classification is skipped |
 | `CLOUDFLARE_SCRIPT_NAME` | – (Cloudflare) | Worker script name. Falls back to the config file or the `name` field of the wrangler config |
 | `--lang <code>` | – | Display language (`en` / `ja`). Default: `en` |
 | `ENV_SYNC_LANG` | – | Display language code (`en` / `ja`). Lower priority than `--lang` |

@@ -624,7 +624,7 @@ variables:
 | `GITHUB_TOKEN` | ◯(GitHub) | GitHub アクセストークン（dry-run 時は不要） |
 | `GITHUB_REPO` | –(GitHub) | `owner/repo` 形式。未指定なら config ファイルまたは `git remote origin` から自動取得 |
 | `CLOUDFLARE_API_TOKEN` | ◯(Cloudflare) | Workers Scripts:Edit 権限を持つ API トークン（dry-run 時は不要） |
-| `CLOUDFLARE_ACCOUNT_ID` | ◯(Cloudflare) | 対象アカウント ID。未指定なら config ファイルの `cloudflare.account_id` |
+| `CLOUDFLARE_ACCOUNT_ID` | ◯(Cloudflare) | 対象アカウント ID。未指定なら config ファイルの `cloudflare.account_id`。dry-run 時は不要だが、無い場合は新規/更新の判定が表示されない |
 | `CLOUDFLARE_SCRIPT_NAME` | –(Cloudflare) | Worker スクリプト名。未指定なら config ファイルまたは wrangler 設定の `name` |
 | `--lang <code>` | – | 表示言語（`en` / `ja`）。デフォルト `en` |
 | `ENV_SYNC_LANG` | – | 表示言語コード（`en` / `ja`）。`--lang` より低優先 |

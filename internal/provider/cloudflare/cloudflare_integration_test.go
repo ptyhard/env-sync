@@ -470,6 +470,83 @@ func TestSync_ErrorWhenTokenMissing(t *testing.T) {
 	}
 }
 
+// captureSyncOsExit はテスト中に syncOsExit を差し替えて終了コードをキャプチャする。
+func captureSyncOsExit(t *testing.T) *int {
+	t.Helper()
+	code := 0
+	orig := syncOsExit
+	syncOsExit = func(c int) { code = c }
+	t.Cleanup(func() { syncOsExit = orig })
+	return &code
+}
+
+func TestSync_CountsTokenMissingTargetAsFailure(t *testing.T) {
+	// 複数ターゲットのうち 1 つがトークン未設定でスキップされた場合、
+	// そのターゲットへ送るはずだった件数を失敗として集計し、終了コード 1 にする。
+	// （集計しないと、他ターゲットが成功しただけで exit 0 になり同期漏れを見逃す）
+	isolateConfig(t)
+	newRecordingServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			io.WriteString(w, `{"success":true,"result":[]}`) //nolint:errcheck
+			return
+		}
+		io.WriteString(w, `{"success":true,"result":{}}`) //nolint:errcheck
+	})
+	// api はトークンあり、cron はトークンなし（top-level / 環境変数にもトークンを置かない）
+	writeFile(t, ".env-sync.config.yaml", `cloudflare:
+  account_id: acct1
+  scripts:
+    - name: api
+      script: my-api-worker
+      api_token: tok
+    - name: cron
+      script: my-cron-worker
+`)
+
+	entries := []provider.Entry{{Key: "API_KEY", Value: "s1", Secret: true}}
+	code := captureSyncOsExit(t)
+
+	p := &cloudflareProvider{}
+	if err := p.Sync(provider.Options{Yes: true}, entries); err != nil {
+		t.Fatalf("エラー: %v", err)
+	}
+	if *code != 1 {
+		t.Errorf("終了コード = %d, want 1（トークン未設定でスキップしたターゲットを失敗として集計するはず）", *code)
+	}
+}
+
+func TestSync_ExitsZeroWhenAllTargetsSucceed(t *testing.T) {
+	// 全ターゲットにトークンがある場合は失敗 0 件で終了コードを変えない
+	isolateConfig(t)
+	newRecordingServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			io.WriteString(w, `{"success":true,"result":[]}`) //nolint:errcheck
+			return
+		}
+		io.WriteString(w, `{"success":true,"result":{}}`) //nolint:errcheck
+	})
+	writeFile(t, ".env-sync.config.yaml", `cloudflare:
+  api_token: tok
+  account_id: acct1
+  scripts:
+    - name: api
+      script: my-api-worker
+    - name: cron
+      script: my-cron-worker
+`)
+
+	entries := []provider.Entry{{Key: "API_KEY", Value: "s1", Secret: true}}
+	code := captureSyncOsExit(t)
+
+	p := &cloudflareProvider{}
+	if err := p.Sync(provider.Options{Yes: true}, entries); err != nil {
+		t.Fatalf("エラー: %v", err)
+	}
+	if *code != 0 {
+		t.Errorf("終了コード = %d, want 0", *code)
+	}
+}
+
 func TestSync_UsesWranglerFallbackForScriptName(t *testing.T) {
 	isolateConfig(t)
 	writeFile(t, "wrangler.toml", "name = \"fallback-worker\"\n")

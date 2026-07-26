@@ -31,6 +31,9 @@ var apiBase = "https://api.cloudflare.com/client/v4"
 // httpTimeout は Cloudflare API 呼び出しの HTTP タイムアウト。
 const httpTimeout = 30 * time.Second
 
+// syncOsExit は Sync の失敗終了に使う関数。テストで差し替えられるよう var にしている。
+var syncOsExit = os.Exit
+
 func init() {
 	provider.RegisterProvider("cloudflare", func() provider.Provider { return &cloudflareProvider{} })
 }
@@ -216,7 +219,13 @@ func (c *cloudflareProvider) Sync(opts provider.Options, entries []provider.Entr
 				return fmt.Errorf("%s", i18n.T(i18n.MsgCloudflareTokenMissingScript, tgt.Name))
 			}
 			fmt.Fprint(os.Stderr, i18n.T(i18n.MsgCloudflareTokenSkipScript, tgt.Name))
-			resolved = append(resolved, resolvedTarget{label: label, skipped: true})
+			// 送信できなかった件数を失敗として集計するため、スキップするターゲットでも tasks を展開しておく。
+			// これを省くと送信フェーズの totalNG に 0 が加算され、ターゲットを丸ごと同期できなかったのに
+			// 他ターゲットが成功すれば exit 0 になってしまう。
+			// この経路に来るのは複数ターゲット時のみで、その場合 cloudflare.scripts[] は script 必須のため
+			// tgt.Script は非空になる（validateCloudflareScriptConfs で検証済み）。
+			skippedTasks := expandCloudflareTasks(secretEntries, tgt.Script, tgt.Environments)
+			resolved = append(resolved, resolvedTarget{label: label, tasks: skippedTasks, skipped: true})
 			continue
 		}
 		// script / accountId は dry-run でも解決できていないと表示すべき対象が定まらないためエラーにする。
@@ -374,7 +383,7 @@ func (c *cloudflareProvider) Sync(opts provider.Options, entries []provider.Entr
 		fmt.Print(i18n.T(i18n.MsgCompleted, totalOK, totalNG))
 	}
 	if totalNG > 0 {
-		os.Exit(1)
+		syncOsExit(1)
 	}
 	return nil
 }

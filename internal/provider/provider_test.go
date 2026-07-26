@@ -10,8 +10,8 @@ import (
 	_ "github.com/ptyhard/env-sync/internal/provider/vercel"
 )
 
-// TestRegistry_VercelGitHubRegistered は vercel/github/cloudflare が registry に登録されているかを確認する。
-func TestRegistry_VercelGitHubRegistered(t *testing.T) {
+// TestRegistry_ProvidersRegistered は vercel/github/cloudflare が registry に登録されているかを確認する。
+func TestRegistry_ProvidersRegistered(t *testing.T) {
 	for _, name := range []string{"vercel", "github", "cloudflare"} {
 		p, ok := provider.LookupProvider(name)
 		if !ok {
