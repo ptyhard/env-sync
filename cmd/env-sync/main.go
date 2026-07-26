@@ -1,5 +1,5 @@
 // Command env-sync は、定義ファイル(env-sync.yaml)で宣言した環境変数を
-// Vercel または GitHub Actions へ一括登録(同期)する。
+// Vercel / GitHub Actions / GCP Secret Manager / Cloudflare Workers へ一括登録(同期)する。
 //
 // 値は定義ファイルには書かず .env(.production) から取得する。
 //
@@ -7,6 +7,7 @@
 //
 //	VERCEL_TOKEN=xxxxx env-sync --env .env.production
 //	GITHUB_TOKEN=xxxxx env-sync --provider github --env .env.production
+//	CLOUDFLARE_API_TOKEN=xxxxx CLOUDFLARE_ACCOUNT_ID=yyyyy env-sync --provider cloudflare --env .env.production
 //
 // 必須 (Vercel):
 //
@@ -39,6 +40,10 @@
 //	github:
 //	  token: <GitHub トークン>
 //	  repo:  <owner/repo>
+//	cloudflare:
+//	  api_token:  <Cloudflare API トークン>
+//	  account_id: <アカウント ID>
+//	  script:     <Worker スクリプト名（省略時は wrangler 設定の name）>
 //
 // YAML スキーマ（モノレポ: 複数プロジェクト / 複数リポジトリ）:
 //
@@ -59,6 +64,15 @@
 //	    - name: backend
 //	      repo: org/backend
 //	      token: <per-repo トークン（任意）>
+//	cloudflare:
+//	  api_token: <デフォルトトークン>
+//	  account_id: <デフォルトアカウント ID>
+//	  scripts:
+//	    - name: api
+//	      script: my-api-worker
+//	    - name: cron
+//	      script: my-cron-worker
+//	      api_token: <per-script トークン（任意）>
 //
 // セキュリティ: global config にトークンが含まれていてパーミッションが 0600 でない場合は警告を出力する。
 //
@@ -66,6 +80,18 @@
 //
 //	GCP_PROJECT_ID      Secret Manager の対象 GCP プロジェクト ID
 //	認証: Application Default Credentials（ADC）を使用。gcloud auth application-default login 等で設定する。
+//
+// 必須 (Cloudflare Workers):
+//
+//	CLOUDFLARE_API_TOKEN   Workers Scripts:Edit 権限を持つ API トークン（dry-run 時は不要）
+//	CLOUDFLARE_ACCOUNT_ID  対象アカウント ID。未指定なら config ファイルから取得
+//
+// 任意 (Cloudflare Workers):
+//
+//	CLOUDFLARE_SCRIPT_NAME Worker スクリプト名。未指定なら config ファイル、
+//	                       次に wrangler.jsonc / wrangler.json / wrangler.toml の name から取得
+//	※ シークレットのみ同期する。secret: false の平文 vars は wrangler 設定の [vars] が管理し、
+//	  次の deploy で上書きされて消えるため、警告のうえスキップする。
 //
 // オプション:
 //
@@ -76,6 +102,7 @@
 //	--yes, -y                 更新(上書き)を含む場合の確認をスキップして送信
 //	--prune                   定義ファイルに無いリモートの変数を削除する（定義ファイルの prune: true でも有効化可）
 //	--environments <list>     書き込み先環境をカンマ区切りで絞り込む（例: staging,preview）
+//	--cloudflare-script <name> config の cloudflare.scripts から指定名のターゲットのみ同期
 package main
 
 import (
@@ -92,6 +119,7 @@ import (
 	"github.com/ptyhard/env-sync/internal/provider"
 	internalsync "github.com/ptyhard/env-sync/internal/sync"
 
+	_ "github.com/ptyhard/env-sync/internal/provider/cloudflare"
 	_ "github.com/ptyhard/env-sync/internal/provider/gcp"
 	_ "github.com/ptyhard/env-sync/internal/provider/github"
 	_ "github.com/ptyhard/env-sync/internal/provider/vercel"

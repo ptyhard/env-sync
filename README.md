@@ -2,11 +2,13 @@
 
 English | [日本語](README.ja.md)
 
-A Go CLI that bulk-registers (syncs) environment variables declared in an `env-sync.yaml` definition file to **Vercel** and/or **GitHub Actions**.
-From a single definition file you can choose the sync target per variable and push to both Vercel and GitHub Actions at once.
+A Go CLI that bulk-registers (syncs) environment variables declared in an `env-sync.yaml` definition file to **Vercel**, **GitHub Actions**, **GCP Secret Manager** and/or **Cloudflare Workers**.
+From a single definition file you can choose the sync target per variable and push to several providers at once.
 
 - **Vercel**: Uses the REST API (`POST /v10/projects/{id}/env?upsert=true`), so re-running **upserts** existing variables.
 - **GitHub Actions**: Supports both Secrets (sealed-box encrypted) and Variables (plaintext).
+- **GCP Secret Manager**: Adds a new Secret version per run. Only `secret: true` entries are synced.
+- **Cloudflare Workers**: Registers Worker Secrets via the REST API. Only `secret: true` entries are synced (see [Sync to Cloudflare Workers](#5-sync-to-cloudflare-workers)).
 
 ## How It Works
 
@@ -182,7 +184,122 @@ variables:
 - Public key length (32 bytes) is validated; invalid keys abort the operation.
 - Public key cache is managed per envScope (environment), as keys differ by scope.
 
-## 5. Mixing Vercel and GitHub Actions
+## 5. Sync to Cloudflare Workers
+
+Use `--provider cloudflare` to sync **Worker Secrets** via the Cloudflare REST API
+(`PUT /accounts/{account_id}/workers/scripts/{script_name}/secrets`).
+
+### Prerequisites
+
+- An API token with the **Workers Scripts:Edit** permission (https://dash.cloudflare.com/profile/api-tokens)
+- Your account ID (Workers & Pages → Overview, or `wrangler whoami`)
+- The Worker script must already exist — env-sync registers secrets on a deployed Worker, it does not create one
+
+### Sync
+
+```bash
+# dry-run (values are not shown)
+CLOUDFLARE_API_TOKEN=xxxxx CLOUDFLARE_ACCOUNT_ID=yyyyy \
+  env-sync --provider cloudflare --env .env.production --dry-run
+
+# Deploy (prompts y/N only when updates exist)
+CLOUDFLARE_API_TOKEN=xxxxx CLOUDFLARE_ACCOUNT_ID=yyyyy \
+  env-sync --provider cloudflare --env .env.production
+
+# Skip update confirmation (for CI, etc.)
+CLOUDFLARE_API_TOKEN=xxxxx CLOUDFLARE_ACCOUNT_ID=yyyyy \
+  env-sync --provider cloudflare --env .env.production --yes
+```
+
+### Secrets only — plain vars are skipped
+
+Cloudflare Workers has two kinds of environment variables, and env-sync only syncs **Secrets**:
+
+| Declaration | Behavior |
+|-------------|----------|
+| `secret: true` | Registered as a Worker Secret. **Preserved across `wrangler deploy`** |
+| `secret: false` | **Skipped with a warning** |
+
+Plain text vars are owned by the `[vars]` section of your wrangler config. Values set through the API or
+dashboard are overwritten by the next `wrangler deploy`, so syncing them would silently lose data.
+Keep plain vars in `wrangler.jsonc` / `wrangler.toml` and let env-sync handle only the secrets.
+
+### `environments` map to separate Worker scripts
+
+wrangler deploys `[env.staging]` as a **separate Worker** named `<script>-staging`. env-sync follows the
+same convention, so each declared environment resolves to its own Worker script:
+
+```yaml
+# env-sync.yaml (script name resolved as "my-worker")
+variables:
+  API_KEY:      { secret: true, provider: cloudflare }
+  DATABASE_URL: { secret: true, provider: cloudflare, environments: [production, staging] }
+```
+
+| Declaration | Target Worker script |
+|-------------|----------------------|
+| `environments` omitted | `my-worker` |
+| `environments: [staging]` | `my-worker-staging` |
+| `environments: [production, staging]` | `my-worker-production` and `my-worker-staging` |
+
+If your production Worker is the base script rather than `my-worker-production`, override the mapping in the
+auth config file:
+
+```yaml
+# .env-sync.config.yaml
+cloudflare:
+  api_token: ${CLOUDFLARE_API_TOKEN}
+  account_id: <account ID>
+  environments:
+    production: my-worker          # production writes to the base script
+    staging: my-worker-staging
+```
+
+Environment names not listed in `cloudflare.environments` still fall back to the `<script>-<environment>` convention.
+
+### Worker script name resolution
+
+Resolution priority (highest first):
+
+1. `CLOUDFLARE_SCRIPT_NAME` environment variable
+2. `cloudflare.script` in the auth config file
+3. The `name` field of `wrangler.jsonc` → `wrangler.json` → `wrangler.toml` in the current directory
+
+If none resolves, the run stops with an error.
+
+### Multiple Workers (monorepo)
+
+Define `cloudflare.scripts[]` to sync to several Workers in one run, and narrow it with `--cloudflare-script`:
+
+```yaml
+# .env-sync.config.yaml
+cloudflare:
+  api_token: ${CLOUDFLARE_API_TOKEN}   # Fallback when api_token is omitted per script
+  account_id: <account ID>             # Fallback when account_id is omitted per script
+  scripts:
+    - name: api                        # Identifier for filtering with --cloudflare-script
+      script: my-api-worker
+    - name: cron
+      script: my-cron-worker
+      api_token: ${CRON_CF_TOKEN}      # Different token for this Worker only
+```
+
+```bash
+# Sync to all defined Workers
+env-sync --provider cloudflare --env .env.production
+
+# Filter to a specific Worker
+env-sync --provider cloudflare --env .env.production --cloudflare-script cron
+```
+
+### Diagnose the configuration
+
+```bash
+# Read-only check of token / accountId / script name and API reachability
+env-sync validate --provider cloudflare
+```
+
+## 6. Mixing Providers
 
 By specifying `provider` per variable, you can sync to both Vercel and GitHub Actions simultaneously from a single `env-sync.yaml`.
 
@@ -218,7 +335,7 @@ Resolution priority (highest first): **per-variable `provider`** → **`defaults
 
 Invalid values (anything other than `vercel` / `github`) cause an error. During `--dry-run`, the `providers` column shows the routing for each variable.
 
-## 6. Managing Auth Credentials and IDs via Config File
+## 7. Managing Auth Credentials and IDs via Config File
 
 Instead of environment variables, you can manage tokens and IDs in a YAML file, eliminating the need to pass `VERCEL_TOKEN=...` every time.
 
@@ -249,6 +366,12 @@ vercel:
 github:
   token: <GitHub access token>
   repo:  <owner/repo format repository name>
+cloudflare:
+  api_token:  <Cloudflare API token>
+  account_id: <account ID>
+  script:     <Worker script name (optional — falls back to the wrangler config)>
+  environments:                    # optional: environment name -> Worker script name
+    staging: my-worker-staging
 ```
 
 ### Multiple Vercel Projects / Multiple GitHub Repos (Monorepo)
@@ -447,6 +570,16 @@ Specifying a named environment in `environments` registers to that environment s
 
 > **Note**: GitHub named environments must be pre-created. Specifying a non-existent environment name results in an error.
 
+#### Field Meanings for Cloudflare Workers
+
+| `secret` | Target | Description |
+|-----------|--------|-------------|
+| `true` | Worker Secret | Registered via the secrets API. Values cannot be read after registration |
+| `false` | — | **Skipped with a warning** (plain vars are owned by the wrangler config `[vars]` section) |
+
+`environments` resolves to a Worker script name per environment (`<script>-<environment>` by default).
+See [Sync to Cloudflare Workers](#5-sync-to-cloudflare-workers) for the mapping rules and how to override them.
+
 ### Pruning Undefined Variables (`prune`)
 
 When `prune: true` is set at the top level of `env-sync.yaml` (or the `--prune` flag is passed), variables that exist on the remote but are **not declared in `variables`** are deleted during sync.
@@ -469,14 +602,16 @@ Safety behavior:
 - **Vercel**: system variables and integration-provisioned variables (those with a `configurationId`, e.g. created by Blob Store or Marketplace integrations) are automatically excluded.
 - **GitHub**: Actions Secrets and Variables are pruned at the repository level and in named environments that appear in the definition file.
 - **GCP**: only Secrets labeled `managed-by=env-sync` are pruned. env-sync adds this label automatically when syncing, so Secrets created by anything else are never touched.
+- **Cloudflare**: Worker Secrets are pruned only on the scripts that the definition file targets. Secrets on Workers that never appear in the run are untouched.
 
 ## Options / Environment Variables
 
 | Item | Required | Description |
 |------|----------|-------------|
-| `--provider <name>` | – | Sync target (default `vercel`). Currently `vercel` / `github` are available |
+| `--provider <name>` | – | Sync target (default `vercel`). Currently `vercel` / `github` / `gcp` / `cloudflare` are available |
 | `--vercel-project <name>` | – | Filter sync to a single `vercel.projects[].name` from config. All defined projects if unspecified |
 | `--github-repo <name>` | – | Filter sync to a single `github.repos[].name` from config. All defined repos if unspecified |
+| `--cloudflare-script <name>` | – | Filter sync to a single `cloudflare.scripts[].name` from config. All defined Workers if unspecified |
 | `--env <file>` | – | Env file to read values from (default `.env`) |
 | `--def <file>` | – | Definition YAML (default `env-sync.yaml`) |
 | `--dry-run` | – | Show planned registrations with new/update classification without sending |
@@ -489,6 +624,9 @@ Safety behavior:
 | `VERCEL_TEAM_ID` | – (Vercel) | Team (org) ID. Falls back to config file or `.vercel/project.json` `orgId` |
 | `GITHUB_TOKEN` | Yes (GitHub) | GitHub access token (not required for dry-run) |
 | `GITHUB_REPO` | – (GitHub) | `owner/repo` format. Auto-detected from config file or `git remote origin` if unset |
+| `CLOUDFLARE_API_TOKEN` | Yes (Cloudflare) | API token with the Workers Scripts:Edit permission (not required for dry-run) |
+| `CLOUDFLARE_ACCOUNT_ID` | Yes (Cloudflare) | Target account ID. Falls back to `cloudflare.account_id` in the config file |
+| `CLOUDFLARE_SCRIPT_NAME` | – (Cloudflare) | Worker script name. Falls back to the config file or the `name` field of the wrangler config |
 | `--lang <code>` | – | Display language (`en` / `ja`). Default: `en` |
 | `ENV_SYNC_LANG` | – | Display language code (`en` / `ja`). Lower priority than `--lang` |
 

@@ -424,22 +424,25 @@ func TestRunSetupWithReader_NeitherProvider(t *testing.T) {
 	dir := t.TempDir()
 	chdirCleanup(t, dir)
 
-	in := simulateInput("n", "n")
+	in := simulateInput("n", "n", "n")
 	if err := config.RunSetupWithReader([]string{}, nil, in); err != nil {
 		t.Fatalf("RunSetupWithReader エラー: %v", err)
 	}
 
-	// ファイルは作成されるが vercel/github セクションは含まれない
+	// ファイルは作成されるが vercel/github/cloudflare セクションは含まれない
 	data, err := os.ReadFile(filepath.Join(dir, ".env-sync.config.yaml"))
 	if err != nil {
 		t.Fatalf(".env-sync.config.yaml が作成されていない: %v", err)
 	}
 	content := string(data)
 	if strings.Contains(content, "vercel:") {
-		t.Error("vercel: セクションが含まれているが両方 n を選択した")
+		t.Error("vercel: セクションが含まれているがすべて n を選択した")
 	}
 	if strings.Contains(content, "github:") {
-		t.Error("github: セクションが含まれているが両方 n を選択した")
+		t.Error("github: セクションが含まれているがすべて n を選択した")
+	}
+	if strings.Contains(content, "cloudflare:") {
+		t.Error("cloudflare: セクションが含まれているがすべて n を選択した")
 	}
 }
 
@@ -473,5 +476,117 @@ func TestParseSetupFlags_Both(t *testing.T) {
 	opts := config.ParseSetupFlags([]string{"--global", "--force"}, nil)
 	if !opts.Global || !opts.Force {
 		t.Errorf("--global --force が反映されない: %+v", opts)
+	}
+}
+
+// --- Cloudflare の setup テスト ---
+
+func TestBuildSetupYAML_CloudflareOnly(t *testing.T) {
+	answers := config.SetupAnswers{
+		UseCloudflare:       true,
+		CloudflareAccountID: "acct_abc",
+		CloudflareScript:    "my-worker",
+		CloudflareTokenRef:  "${CLOUDFLARE_API_TOKEN}",
+	}
+	out := config.BuildSetupYAML(answers)
+	if !strings.Contains(out, "cloudflare:") {
+		t.Error("cloudflare: セクションが含まれていない")
+	}
+	if !strings.Contains(out, "acct_abc") {
+		t.Errorf("account_id が含まれていない:\n%s", out)
+	}
+	if !strings.Contains(out, "my-worker") {
+		t.Errorf("script が含まれていない:\n%s", out)
+	}
+	if strings.Contains(out, "vercel:") || strings.Contains(out, "github:") {
+		t.Error("vercel: / github: セクションが含まれているが選択していない")
+	}
+}
+
+func TestBuildSetupYAML_CloudflareOmitsEmptyScript(t *testing.T) {
+	// script 未入力（wrangler 設定から解決する運用）のときは script 行を出さない
+	answers := config.SetupAnswers{
+		UseCloudflare:       true,
+		CloudflareAccountID: "acct_abc",
+		CloudflareTokenRef:  "${CLOUDFLARE_API_TOKEN}",
+	}
+	out := config.BuildSetupYAML(answers)
+	if strings.Contains(out, "script:") {
+		t.Errorf("script が空なのに script: 行が出力されている:\n%s", out)
+	}
+}
+
+func TestBuildSetupYAML_CloudflareRoundTripAsAppConfig(t *testing.T) {
+	t.Setenv("CLOUDFLARE_API_TOKEN", "cf-test")
+
+	answers := config.SetupAnswers{
+		UseCloudflare:       true,
+		CloudflareAccountID: "acct_round",
+		CloudflareScript:    "round-worker",
+		CloudflareTokenRef:  "${CLOUDFLARE_API_TOKEN}",
+	}
+	yamlText := config.BuildSetupYAML(answers)
+
+	var cfg config.AppConfig
+	if err := yaml.Unmarshal([]byte(yamlText), &cfg); err != nil {
+		t.Fatalf("生成 YAML が AppConfig としてパースできない: %v\n%s", err, yamlText)
+	}
+	if cfg.Cloudflare.AccountID != "acct_round" {
+		t.Errorf("Cloudflare.AccountID = %q, want acct_round", cfg.Cloudflare.AccountID)
+	}
+	if cfg.Cloudflare.Script != "round-worker" {
+		t.Errorf("Cloudflare.Script = %q, want round-worker", cfg.Cloudflare.Script)
+	}
+	if cfg.Cloudflare.APIToken != "${CLOUDFLARE_API_TOKEN}" {
+		t.Errorf("Cloudflare.APIToken = %q, want ${CLOUDFLARE_API_TOKEN}", cfg.Cloudflare.APIToken)
+	}
+}
+
+func TestRunSetupWithReader_CloudflareEnvRef(t *testing.T) {
+	dir := t.TempDir()
+	chdirCleanup(t, dir)
+
+	// Vercel n, GitHub n, Cloudflare yes（account_id / script / 環境変数参照）
+	in := simulateInput("n", "n", "Y", "acct_cli", "cli-worker", "Y")
+	if err := config.RunSetupWithReader([]string{}, nil, in); err != nil {
+		t.Fatalf("RunSetupWithReader エラー: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, ".env-sync.config.yaml"))
+	if err != nil {
+		t.Fatalf(".env-sync.config.yaml が作成されていない: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "cloudflare:") {
+		t.Errorf("cloudflare: セクションが含まれていない:\n%s", content)
+	}
+	if !strings.Contains(content, "acct_cli") {
+		t.Errorf("account_id が含まれていない:\n%s", content)
+	}
+	if !strings.Contains(content, "cli-worker") {
+		t.Errorf("script が含まれていない:\n%s", content)
+	}
+	if !strings.Contains(content, "${CLOUDFLARE_API_TOKEN}") {
+		t.Errorf("Cloudflare token が環境変数参照になっていない:\n%s", content)
+	}
+}
+
+func TestRunSetupWithReader_CloudflarePlainToken_0600(t *testing.T) {
+	dir := t.TempDir()
+	chdirCleanup(t, dir)
+
+	// Cloudflare のみ・平文トークン入力 → 0600 で作成される
+	in := simulateInput("n", "n", "Y", "acct_cli", "", "n", "cf-raw-token")
+	if err := config.RunSetupWithReader([]string{}, nil, in); err != nil {
+		t.Fatalf("RunSetupWithReader エラー: %v", err)
+	}
+
+	path := filepath.Join(dir, ".env-sync.config.yaml")
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("ファイルが作成されていない: %v", err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Errorf("パーミッション = %04o, want 0600（平文トークンを含むため）", info.Mode().Perm())
 	}
 }

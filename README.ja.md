@@ -2,11 +2,13 @@
 
 [English](README.md) | 日本語
 
-定義ファイル `env-sync.yaml` で宣言した環境変数を **Vercel** または **GitHub Actions** へ一括登録（同期）する Go 製 CLI。
-1 つの定義ファイルから、変数ごとに同期先を選んで Vercel / GitHub Actions の両方へまとめて反映できる。
+定義ファイル `env-sync.yaml` で宣言した環境変数を **Vercel** / **GitHub Actions** / **GCP Secret Manager** / **Cloudflare Workers** へ一括登録（同期）する Go 製 CLI。
+1 つの定義ファイルから、変数ごとに同期先を選んで複数のプロバイダーへまとめて反映できる。
 
 - **Vercel**: REST API (`POST /v10/projects/{id}/env?upsert=true`) を使うため、再実行すると既存の変数は **更新（upsert）** される。
 - **GitHub Actions**: Secrets（sealed box 暗号化）と Variables（平文）の両方に対応する。
+- **GCP Secret Manager**: 実行ごとに Secret のバージョンを追加する。`secret: true` のエントリのみ同期する。
+- **Cloudflare Workers**: REST API で Worker Secrets を登録する。`secret: true` のエントリのみ同期する（[Cloudflare Workers へ同期](#5-cloudflare-workers-へ同期)を参照）。
 
 ## 仕組み
 
@@ -182,7 +184,121 @@ variables:
 - 公開鍵の長さ（32 バイト）を検証し、不正な鍵では処理を中止します。
 - 公開鍵キャッシュは envScope（environment）ごとに管理します（スコープで鍵が異なるため）。
 
-## 5. Vercel と GitHub Actions を混在させる
+## 5. Cloudflare Workers へ同期
+
+`--provider cloudflare` を指定すると、Cloudflare REST API
+(`PUT /accounts/{account_id}/workers/scripts/{script_name}/secrets`) 経由で **Worker Secrets** を同期します。
+
+### 事前準備
+
+- **Workers Scripts:Edit** 権限を持つ API トークン（https://dash.cloudflare.com/profile/api-tokens）
+- アカウント ID（Workers & Pages → 概要、または `wrangler whoami`）
+- 対象の Worker スクリプトが既にデプロイ済みであること（env-sync は Worker を新規作成しません）
+
+### 同期
+
+```bash
+# dry-run（値は表示されない）
+CLOUDFLARE_API_TOKEN=xxxxx CLOUDFLARE_ACCOUNT_ID=yyyyy \
+  env-sync --provider cloudflare --env .env.production --dry-run
+
+# 本番反映（更新がある場合のみ y/N 確認）
+CLOUDFLARE_API_TOKEN=xxxxx CLOUDFLARE_ACCOUNT_ID=yyyyy \
+  env-sync --provider cloudflare --env .env.production
+
+# 更新確認をスキップ（CI 等）
+CLOUDFLARE_API_TOKEN=xxxxx CLOUDFLARE_ACCOUNT_ID=yyyyy \
+  env-sync --provider cloudflare --env .env.production --yes
+```
+
+### シークレットのみ同期（平文 vars はスキップ）
+
+Cloudflare Workers の環境変数には 2 種類あり、env-sync が同期するのは **Secrets のみ**です。
+
+| 宣言 | 挙動 |
+|------|------|
+| `secret: true` | Worker Secret として登録。**`wrangler deploy` をまたいで保持される** |
+| `secret: false` | **警告を出してスキップ** |
+
+平文 vars は wrangler 設定の `[vars]` セクションが管理しており、API やダッシュボードで設定した値は
+次の `wrangler deploy` で上書きされて消えます。同期しても黙って失われるため、平文 vars は
+`wrangler.jsonc` / `wrangler.toml` 側で管理し、env-sync はシークレットのみを扱います。
+
+### `environments` は別の Worker スクリプトに対応する
+
+wrangler は `[env.staging]` を `<スクリプト名>-staging` という **別の Worker** としてデプロイします。
+env-sync もこの慣習に従い、宣言した環境ごとに対応する Worker スクリプトへ書き込みます。
+
+```yaml
+# env-sync.yaml（スクリプト名が "my-worker" に解決される場合）
+variables:
+  API_KEY:      { secret: true, provider: cloudflare }
+  DATABASE_URL: { secret: true, provider: cloudflare, environments: [production, staging] }
+```
+
+| 宣言 | 送信先 Worker スクリプト |
+|------|------------------------|
+| `environments` 省略 | `my-worker` |
+| `environments: [staging]` | `my-worker-staging` |
+| `environments: [production, staging]` | `my-worker-production` と `my-worker-staging` |
+
+本番 Worker が `my-worker-production` ではなくベーススクリプトの場合は、認証情報 config で対応を上書きできます。
+
+```yaml
+# .env-sync.config.yaml
+cloudflare:
+  api_token: ${CLOUDFLARE_API_TOKEN}
+  account_id: <アカウント ID>
+  environments:
+    production: my-worker          # production はベーススクリプトへ書き込む
+    staging: my-worker-staging
+```
+
+`cloudflare.environments` に無い環境名は従来どおり `<スクリプト名>-<環境名>` の規約で解決されます。
+
+### Worker スクリプト名の解決順
+
+解決優先順位（高い順）:
+
+1. 環境変数 `CLOUDFLARE_SCRIPT_NAME`
+2. 認証情報 config の `cloudflare.script`
+3. カレントディレクトリの `wrangler.jsonc` → `wrangler.json` → `wrangler.toml` の `name` フィールド
+
+いずれでも解決できない場合はエラーで停止します。
+
+### 複数 Worker（モノレポ）
+
+`cloudflare.scripts[]` を定義すると 1 回の実行で複数の Worker へ同期でき、`--cloudflare-script` で絞り込めます。
+
+```yaml
+# .env-sync.config.yaml
+cloudflare:
+  api_token: ${CLOUDFLARE_API_TOKEN}   # per-script で省略した場合のフォールバック
+  account_id: <アカウント ID>           # per-script で省略した場合のフォールバック
+  scripts:
+    - name: api                        # --cloudflare-script で絞り込むための識別名
+      script: my-api-worker
+    - name: cron
+      script: my-cron-worker
+      api_token: ${CRON_CF_TOKEN}      # この Worker だけ別トークン
+```
+
+```bash
+# 定義済みの全 Worker へ同期
+env-sync --provider cloudflare --env .env.production
+
+# 特定の Worker のみに絞る
+env-sync --provider cloudflare --env .env.production --cloudflare-script cron
+```
+
+### 設定の診断
+
+```bash
+# token / accountId / スクリプト名の設定と API 到達確認（読み取り専用）
+env-sync validate --provider cloudflare
+```
+
+## 6. 複数プロバイダーを混在させる
 
 変数ごとに `provider` を指定すると、1 つの `env-sync.yaml` から Vercel と GitHub Actions の両方へ同時に同期できます。
 
@@ -218,7 +334,7 @@ VERCEL_TOKEN=xxxxx GITHUB_TOKEN=yyyyy env-sync --env .env.production
 
 不正な値（`vercel` / `github` 以外）を指定するとエラーで中止します。`--dry-run` では各変数の `providers` 列で振り分け先を確認できます。
 
-## 6. config ファイルで認証情報・ID を管理する
+## 7. config ファイルで認証情報・ID を管理する
 
 環境変数の代わりに YAML ファイルでトークンや ID を管理できます。毎回 `VERCEL_TOKEN=...` を渡す手間を省けます。
 
@@ -249,6 +365,12 @@ vercel:
 github:
   token: <GitHub アクセストークン>
   repo:  <owner/repo 形式のリポジトリ名>
+cloudflare:
+  api_token:  <Cloudflare API トークン>
+  account_id: <アカウント ID>
+  script:     <Worker スクリプト名（任意。省略時は wrangler 設定から取得）>
+  environments:                    # 任意: 環境名 -> Worker スクリプト名
+    staging: my-worker-staging
 ```
 
 ### 複数 Vercel プロジェクト / 複数 GitHub リポジトリ（モノレポ）
@@ -447,6 +569,16 @@ variables:
 
 > **注意**: GitHub の named environment は事前に作成が必要です。存在しない environment 名を指定するとエラーになります。
 
+#### Cloudflare Workers における各フィールドの意味
+
+| `secret` | 登録先 | 説明 |
+|---|---|---|
+| `true` | Worker Secret | secrets API 経由で登録。登録後は値を閲覧不可 |
+| `false` | — | **警告を出してスキップ**（平文 vars は wrangler 設定の `[vars]` が管理するため） |
+
+`environments` は環境ごとの Worker スクリプト名に解決されます（デフォルトは `<スクリプト名>-<環境名>`）。
+対応規則と上書き方法は[Cloudflare Workers へ同期](#5-cloudflare-workers-へ同期)を参照してください。
+
 ### 定義に無い変数の削除（prune）
 
 `env-sync.yaml` のトップレベルに `prune: true` を書く（または `--prune` フラグを付ける）と、リモートに存在するが **`variables` に宣言されていない** 変数を同期時に削除します。
@@ -469,14 +601,16 @@ variables:
 - **Vercel**: システム変数と、インテグレーションが作成した変数（Blob Store・Marketplace 連携などで `configurationId` を持つもの）は自動で除外されます。
 - **GitHub**: Actions Secrets / Variables を、repo レベルと定義ファイルに現れる named environment のスコープで削除します。
 - **GCP**: `managed-by=env-sync` ラベル付き Secret のみ削除対象です。このラベルは env-sync が同期時に自動付与するため、env-sync 以外が作成した Secret には触れません。
+- **Cloudflare**: 定義ファイルが対象とするスクリプトの Worker Secrets のみ削除対象です。その実行に現れない Worker のシークレットには触れません。
 
 ## オプション / 環境変数
 
 | 項目 | 必須 | 説明 |
 |------|------|------|
-| `--provider <name>` | – | 同期先（デフォルト `vercel`）。現在 `vercel` / `github` が利用可 |
+| `--provider <name>` | – | 同期先（デフォルト `vercel`）。現在 `vercel` / `github` / `gcp` / `cloudflare` が利用可 |
 | `--vercel-project <name>` | – | 同期対象を config の `vercel.projects[].name` 1 件に絞る。未指定なら定義済み全プロジェクト |
 | `--github-repo <name>` | – | 同期対象を config の `github.repos[].name` 1 件に絞る。未指定なら定義済み全リポジトリ |
+| `--cloudflare-script <name>` | – | 同期対象を config の `cloudflare.scripts[].name` 1 件に絞る。未指定なら定義済み全 Worker |
 | `--env <file>` | – | 値を読む env ファイル（デフォルト `.env`） |
 | `--def <file>` | – | 定義 YAML（デフォルト `env-sync.yaml`） |
 | `--dry-run` | – | 送信せず新規/更新の区別を含む登録予定一覧を表示 |
@@ -489,6 +623,9 @@ variables:
 | `VERCEL_TEAM_ID` | –(Vercel) | チーム(Org) ID。未指定なら config ファイルまたは `.vercel/project.json` の `orgId` |
 | `GITHUB_TOKEN` | ◯(GitHub) | GitHub アクセストークン（dry-run 時は不要） |
 | `GITHUB_REPO` | –(GitHub) | `owner/repo` 形式。未指定なら config ファイルまたは `git remote origin` から自動取得 |
+| `CLOUDFLARE_API_TOKEN` | ◯(Cloudflare) | Workers Scripts:Edit 権限を持つ API トークン（dry-run 時は不要） |
+| `CLOUDFLARE_ACCOUNT_ID` | ◯(Cloudflare) | 対象アカウント ID。未指定なら config ファイルの `cloudflare.account_id` |
+| `CLOUDFLARE_SCRIPT_NAME` | –(Cloudflare) | Worker スクリプト名。未指定なら config ファイルまたは wrangler 設定の `name` |
 | `--lang <code>` | – | 表示言語（`en` / `ja`）。デフォルト `en` |
 | `ENV_SYNC_LANG` | – | 表示言語コード（`en` / `ja`）。`--lang` より低優先 |
 

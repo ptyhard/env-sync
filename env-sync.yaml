@@ -1,4 +1,4 @@
-# Vercel / GitHub Actions に登録する環境変数の定義。
+# Vercel / GitHub Actions / GCP Secret Manager / Cloudflare Workers に登録する環境変数の定義。
 #
 # 値はこのファイルには書かない（git にコミットされるため）。値は .env(.production) から取得する。
 # ここに宣言が無いキーは登録されない（.env にあっても警告のうえスキップされる）。
@@ -14,6 +14,7 @@
 #                      現れる named environment のみスキャンする。
 #           - GCP    : managed-by=env-sync ラベル付き Secret のみ削除対象
 #                      （env-sync が同期時に自動付与。無関係な Secret は消さない）。
+#           - Cloudflare : この実行が対象とする Worker スクリプトのシークレットのみ削除対象。
 #
 #   prune_exclude: []（トップレベル、任意）
 #           prune で削除しないキー名の glob パターン一覧。大文字小文字は区別しない。
@@ -23,9 +24,12 @@
 #           - true  : シークレットとして登録
 #                     Vercel: sensitive（保存後は値を読めない）
 #                     GitHub: Actions Secret（sealed box 暗号化）
+#                     Cloudflare: Worker Secret（デプロイをまたいで保持される）
 #           - false : 平文として登録
 #                     Vercel: plain
 #                     GitHub: Actions Variable
+#                     Cloudflare: 警告を出してスキップ（平文 vars は wrangler の [vars] が管理し、
+#                                 次の deploy で上書きされて消えるため同期しない）
 #           ※ 未指定時のデフォルトは true（安全側）
 #
 #   environments: []  登録先環境の配列
@@ -34,6 +38,9 @@
 #                   ※ Custom Environment は Vercel 側で事前作成が必要。存在しない slug はエラー。
 #                   ※ 標準環境と Custom Environment は混在指定可（例: [production, staging]）
 #           GitHub: named environment 名（空なら repo レベル）
+#           Cloudflare: Worker スクリプト名のサフィックス「<script>-<環境名>」（空ならベーススクリプト）
+#                   ※ wrangler が [env.staging] を my-worker-staging としてデプロイする慣習に合わせている。
+#                   ※ 認証 config の cloudflare.environments で環境名→スクリプト名を上書きできる。
 #           ※ GitHub の named environment は事前に作成が必要
 #
 #   --environments <list>  （CLI フラグ。このファイルには書かない）
@@ -45,11 +52,12 @@
 #           指定できる名前は production|preview|development + この定義に現れる環境名のみ
 #           （それ以外はエラー。大文字小文字を区別する）。
 #
-#   provider: vercel|github|gcp|[vercel, gcp]|[vercel, github]
+#   provider: vercel|github|gcp|cloudflare|[vercel, gcp]|[vercel, github]
 #           同期先プロバイダーを変数ごとに指定する。
 #           - provider: vercel             Vercel にのみ送る
 #           - provider: github             GitHub Actions にのみ送る
 #           - provider: gcp               GCP Secret Manager にのみ送る
+#           - provider: cloudflare         Cloudflare Workers にのみ送る
 #           - provider: [vercel, gcp]      Vercel と GCP 両方に送る
 #           - provider: [vercel, github]   Vercel と GitHub 両方に送る
 #           解決優先順位: 変数個別 > defaults > CLI --provider フラグ（デフォルト vercel）
@@ -71,10 +79,20 @@
 #           environments に値を設定すると、Secret に labels {"environment": "<env>"} が付与される
 #           ※ environments が複数の場合は "-" で連結（例: [production, staging] → "production-staging"）
 #
-#   ---- 複数 Vercel プロジェクト / 複数 GitHub リポジトリ（モノレポ） ----
+#   ---- Cloudflare Workers ----
+#           必須環境変数: CLOUDFLARE_API_TOKEN（Workers Scripts:Edit 権限）
+#                        CLOUDFLARE_ACCOUNT_ID（対象アカウント ID）
+#           Worker スクリプト名の解決順:
+#             CLOUDFLARE_SCRIPT_NAME > 認証 config の cloudflare.script >
+#             wrangler.jsonc / wrangler.json / wrangler.toml の name
+#           secret: true のエントリのみ同期（false は警告のうえスキップ）
+#           environments を設定すると環境ごとに別 Worker スクリプトへ書き込む（上の environments を参照）
+#
+#   ---- 複数 Vercel プロジェクト / 複数 GitHub リポジトリ / 複数 Worker（モノレポ） ----
 #           このファイルは「変数定義」用。複数の同期先（Vercel プロジェクト・GitHub リポジトリ）は
 #           認証 config 側（.env-sync.config.yaml / ~/.config/env-sync/config.yaml）の
-#           vercel.projects[] / github.repos[] で定義する。--vercel-project / --github-repo で絞り込める。
+#           vercel.projects[] / github.repos[] / cloudflare.scripts[] で定義する。
+#           --vercel-project / --github-repo / --cloudflare-script で絞り込める。
 #           詳細は README「複数 Vercel プロジェクト / 複数 GitHub リポジトリ（モノレポ）」を参照。
 
 defaults:
@@ -101,3 +119,10 @@ variables:
   # GCP_ONLY_SECRET:          { provider: gcp }
   # GCP_ENV_SECRET:           { provider: gcp, environments: [production] }
   # VERCEL_AND_GCP_SECRET:    { provider: [vercel, gcp] }
+  #
+  # ---- Cloudflare Workers の例 ----
+  # CLOUDFLARE_API_TOKEN=xxx CLOUDFLARE_ACCOUNT_ID=yyy env-sync --provider cloudflare --env .env.production
+  #
+  # CF_ONLY_SECRET:           { provider: cloudflare }
+  # CF_STAGING_SECRET:        { provider: cloudflare, environments: [staging] }   # -> <script>-staging
+  # VERCEL_AND_CF_SECRET:     { provider: [vercel, cloudflare] }

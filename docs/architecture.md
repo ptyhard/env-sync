@@ -1,8 +1,8 @@
 # アーキテクチャ規約
 
-> 最終更新: 2026-06-26
+> 最終更新: 2026-07-26
 
-`env-sync` は、定義ファイル `env-sync.yaml` で宣言した環境変数を **Vercel** または **GitHub Actions** へ一括同期する Go 製の単一バイナリ CLI。値は定義ファイルには書かず `.env(.production)` から読み込む。
+`env-sync` は、定義ファイル `env-sync.yaml` で宣言した環境変数を **Vercel** / **GitHub Actions** / **GCP Secret Manager** / **Cloudflare Workers** へ一括同期する Go 製の単一バイナリ CLI。値は定義ファイルには書かず `.env(.production)` から読み込む。
 
 ## 技術スタック
 
@@ -46,10 +46,19 @@
 │       ├── vercel/
 │       │   ├── vercel.go  # vercelProvider + init()（const apiBase はここに定義）
 │       │   └── vercel_test.go
-│       └── github/
-│           ├── github.go  # githubProvider + init()
-│           ├── github_test.go
-│           └── github_integration_test.go
+│       ├── github/
+│       │   ├── github.go  # githubProvider + init()
+│       │   ├── github_test.go
+│       │   └── github_integration_test.go
+│       ├── gcp/
+│       │   ├── gcp.go     # gcpProvider + init()（Secret Manager クライアントを抽象化）
+│       │   └── gcp_test.go
+│       └── cloudflare/
+│           ├── cloudflare.go           # cloudflareProvider + init()（var apiBase はここに定義）
+│           ├── cloudflare_validate.go  # validate サブコマンド実装
+│           ├── cloudflare_test.go
+│           ├── cloudflare_validate_test.go
+│           └── cloudflare_integration_test.go
 ├── env-sync.yaml      # secret / environments の定義ファイル（値は書かない）
 ├── go.mod / go.sum
 ├── .goreleaser.yaml
@@ -68,8 +77,11 @@ internal/config            → internal/provider
 internal/sync              → internal/provider, internal/config
 internal/provider/vercel   → internal/provider, internal/config
 internal/provider/github   → internal/provider, internal/config
+internal/provider/gcp      → internal/provider, internal/config
+internal/provider/cloudflare → internal/provider, internal/config
 cmd/env-sync               → internal/provider, internal/config, internal/sync,
-                             _ internal/provider/vercel, _ internal/provider/github
+                             _ internal/provider/vercel, _ internal/provider/github,
+                             _ internal/provider/gcp, _ internal/provider/cloudflare
 ```
 
 `internal/provider` に `Entry` と `Options` を定義することで、`internal/config` → `internal/provider` の一方向依存を保ち循環参照を防いでいる。
@@ -134,6 +146,7 @@ provider 側での翻訳:
 
 - **Vercel**（`entriesToVercelItems`, `internal/provider/vercel/vercel.go`）: `Secret` → `type`（true=`sensitive` / false=`plain`）、`Environments` → `target`（空なら `[production, preview]`）。`production|preview|development` のみ許可。
 - **GitHub**（`expandGitHubTasks`, `internal/provider/github/github.go`）: `Secret` → Secret(sealed box 暗号化) / Variable(平文) の振り分け、`Environments` → named environment スコープ（空なら repo レベル。各環境ごとに task を展開）。
+- **Cloudflare**（`expandCloudflareTasks`, `internal/provider/cloudflare/cloudflare.go`）: `Secret` == false は警告のうえスキップ（平文 vars は wrangler 設定の `[vars]` が所有し、次の `wrangler deploy` で上書きされるため）。`Environments` → Worker スクリプト名（`resolveScriptName` が `<script>-<env>` へ解決。認証 config の `cloudflare.environments` で上書き可）。1 つの Entry が複数環境を宣言していれば環境ごとに task を展開し、同一スクリプトに解決された場合は重複排除する。
 
 ## 設定ファイル（env-sync.yaml）の構造
 
@@ -169,6 +182,7 @@ type VarConf struct {
 | フラグ | 既定 | 説明 |
 |--------|------|------|
 | `--provider <name>` | `vercel` | 同期先（registry に登録された provider 名のみ。未登録はエラー） |
+| `--cloudflare-script <name>` | — | config の `cloudflare.scripts[].name` 1 件に絞る（モノレポ対応） |
 | `--env <file>` | `.env` | 値を読む env ファイル |
 | `--def <file>` | `env-sync.yaml` | 定義 YAML |
 | `--dry-run` | false | 送信せず対象（key / secret / environments）のみ表示（値は出さない） |
@@ -186,6 +200,9 @@ type VarConf struct {
 | `VERCEL_TEAM_ID` | Vercel | 未指定なら `.vercel/project.json` の `orgId` |
 | `GITHUB_TOKEN` | GitHub | アクセストークン（dry-run 時は不要） |
 | `GITHUB_REPO` | GitHub | `owner/repo`。未指定なら `git remote origin` から自動解決 |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare | API トークン（Workers Scripts:Edit 権限。dry-run 時は不要） |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare | 対象アカウント ID。未指定なら config ファイル |
+| `CLOUDFLARE_SCRIPT_NAME` | Cloudflare | Worker スクリプト名。未指定なら config、次に `wrangler.jsonc`/`wrangler.json`/`wrangler.toml` の `name`（`applyWranglerFallback`） |
 
 トークン等の秘匿値はすべて `os.Getenv` で取得し、コードやログには出さない。GitHub Secrets は送信前に NaCl box で sealed box 暗号化する（`encryptSecret`, `internal/provider/github/github.go`）。
 

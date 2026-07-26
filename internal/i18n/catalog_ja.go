@@ -20,7 +20,7 @@ var jaCatalog = map[MsgKey]string{
 	MsgSkipNoValueInEnv:          "⚠ %s: 定義にあるが %s に値が無いためスキップ\n",
 	MsgSkipNotDefined:            "⚠ %s: %s にあるが定義に無いためスキップ\n",
 	MsgSkipNoMatchingEnvironment: "⚠ %s: --environments フィルタ後に一致する環境が無いためスキップ\n",
-	MsgUsage: `env-sync - 定義ファイルで宣言した環境変数を Vercel または GitHub Actions へ一括登録(同期)する
+	MsgUsage: `env-sync - 定義ファイルで宣言した環境変数を Vercel / GitHub Actions / GCP / Cloudflare Workers へ一括登録(同期)する
 
 サブコマンド:
   init      .env から env-sync.yaml の雛形を生成する
@@ -30,6 +30,7 @@ var jaCatalog = map[MsgKey]string{
 使い方:
   VERCEL_TOKEN=xxxxx env-sync [オプション]
   GITHUB_TOKEN=xxxxx env-sync --provider github [オプション]
+  CLOUDFLARE_API_TOKEN=xxxxx env-sync --provider cloudflare [オプション]
   env-sync init [--env <file>] [--def <file>] [--force]
   env-sync setup [--global] [--force]
 
@@ -45,6 +46,8 @@ var jaCatalog = map[MsgKey]string{
                             --prune 併用時: 削除スコープも指定環境に限定する
   --vercel-project <name>   config の vercel.projects から指定名のプロジェクトのみ同期（モノレポ対応）
   --github-repo <name>      config の github.repos から指定名のリポジトリのみ同期（モノレポ対応）
+  --cloudflare-script <name>
+                            config の cloudflare.scripts から指定名のターゲットのみ同期（モノレポ対応）
   --lang <code>             表示言語（en / ja、デフォルト en）
   --version                 バージョン情報を表示して終了
   -h, --help                このヘルプを表示
@@ -78,6 +81,16 @@ var jaCatalog = map[MsgKey]string{
         GOOGLE_APPLICATION_CREDENTIALS でサービスアカウント鍵を指定、
         または gcloud auth application-default login で ADC を設定する。
 
+環境変数（Cloudflare Workers）:
+  CLOUDFLARE_API_TOKEN   Workers Scripts:Edit 権限を持つ API トークン（必須、dry-run 時は不要）
+  CLOUDFLARE_ACCOUNT_ID  対象アカウント ID。未指定なら config ファイルから取得
+  CLOUDFLARE_SCRIPT_NAME Worker スクリプト名。未指定なら config ファイル、または
+                         wrangler.jsonc / wrangler.json / wrangler.toml の name から取得
+  ※ シークレットのみ同期します。平文 vars（secret: false）はスキップします。
+     平文 vars は wrangler 設定の [vars] が管理しており、次の deploy で上書きされて消えるためです。
+  ※ environments は「<スクリプト名>-<環境名>」という別 Worker スクリプトに対応づきます
+     （wrangler の [env.X] の慣習）。config の cloudflare.environments で対応を上書きできます。
+
 環境変数（言語）:
   ENV_SYNC_LANG  表示言語コード（en / ja）。--lang フラグより低優先。
 
@@ -94,6 +107,12 @@ config ファイル（環境変数の代替）:
     github:
       token: <GitHub トークン>
       repo:  <owner/repo>
+    cloudflare:
+      api_token:  <Cloudflare API トークン>
+      account_id: <アカウント ID>
+      script:     <Worker スクリプト名（任意。省略時は wrangler 設定から取得）>
+      environments:                 # 任意: 環境名 -> Worker スクリプト名
+        staging: my-worker-staging
 
   スキーマ（モノレポ: 複数プロジェクト / 複数リポジトリ）:
     vercel:
@@ -114,19 +133,32 @@ config ファイル（環境変数の代替）:
         - name: backend
           repo: org/backend
           token: <per-repo トークン（任意）>
+    cloudflare:
+      api_token: <デフォルトトークン（per-script で上書き可）>
+      account_id: <デフォルトアカウント ID>
+      scripts:
+        - name: api
+          script: my-api-worker
+        - name: cron
+          script: my-cron-worker
+          api_token: <per-script トークン（任意）>
+          account_id: <per-script アカウント ID（任意）>
 
   ※ global config にトークンが含まれていてパーミッションが 0600 でない場合は警告を出力します
 
 YAML スキーマ（定義ファイル env-sync.yaml）:
   prune: true|false   variables に無いリモートの変数を削除するか（デフォルト false）
                       Vercel: 環境変数 / GitHub: Actions Secrets・Variables /
-                      GCP: managed-by=env-sync ラベル付き Secret のみ対象
+                      GCP: managed-by=env-sync ラベル付き Secret のみ対象 /
+                      Cloudflare: 対象スクリプトの Worker シークレット
   secret: true|false  シークレットとして登録するか（デフォルト true）
                       Vercel: true→sensitive / false→plain
                       GitHub: true→Secret / false→Variable
+                      Cloudflare: true→シークレット / false→スキップ（wrangler の [vars] が管理）
   environments: []    登録先環境の配列
                       Vercel: production|preview|development（空なら production,preview）
                       GitHub: named environment 名（空なら repo レベル）
+                      Cloudflare: Worker スクリプト名のサフィックス「<script>-<環境名>」（空ならベーススクリプト）
                       ※ GitHub の named environment は事前に作成が必要
   language: ja        表示言語（en / ja）。--lang フラグ・ENV_SYNC_LANG より低優先。
 `,
@@ -173,6 +205,12 @@ YAML スキーマ（定義ファイル env-sync.yaml）:
 	MsgGitHubRepoNameDuplicate:    "github.repos の name %q が重複しています",
 	MsgGitHubRepoRepoRequired:     "github.repos のエントリ %q には repo が必須です",
 
+	MsgCloudflareScriptsNotDefined:   "--cloudflare-script が指定されましたが config に cloudflare.scripts が定義されていません",
+	MsgCloudflareScriptNameNotFound:  "指定された Cloudflare ターゲット名 %q は config に定義されていません",
+	MsgCloudflareScriptNameRequired:  "cloudflare.scripts の各エントリには name が必須です",
+	MsgCloudflareScriptNameDuplicate: "cloudflare.scripts に重複する name %q があります",
+	MsgCloudflareScriptRequired:      "cloudflare.scripts のエントリ %q には script が必須です",
+
 	// ----- Init サブコマンド -----
 	MsgInitEnvFileReadFail: "env ファイルの読み込みに失敗: %s: %s",
 	MsgFileExists:          "既に存在します: %s（上書きするには --force）",
@@ -181,17 +219,18 @@ YAML スキーマ（定義ファイル env-sync.yaml）:
 	MsgInitKeyCount:        "キー数: %d\n",
 	MsgInitKeyListHeader:   "キー一覧:\n",
 	MsgInitSecretNote:      "※ secret は投入前に必ず見直してください。値はファイルに書かれていません。",
-	MsgInitYAMLHeader: "# Vercel / GitHub Actions に登録する環境変数の定義。\n" +
+	MsgInitYAMLHeader: "# Vercel / GitHub Actions / GCP / Cloudflare Workers に登録する環境変数の定義。\n" +
 		"#\n" +
 		"# 値はこのファイルには書かない（git にコミットされるため）。値は .env(.production) から取得する。\n" +
 		"# ここに宣言が無いキーは登録されない（.env にあっても警告のうえスキップされる）。\n" +
 		"#\n" +
 		"#   secret: true|false\n" +
-		"#           - true  : シークレットとして登録（Vercel: sensitive / GitHub: Secret）\n" +
-		"#           - false : 平文として登録（Vercel: plain / GitHub: Variable）\n" +
+		"#           - true  : シークレットとして登録（Vercel: sensitive / GitHub: Secret / Cloudflare: Worker Secret）\n" +
+		"#           - false : 平文として登録（Vercel: plain / GitHub: Variable / Cloudflare: スキップ）\n" +
 		"#   environments: []  登録先環境の配列\n" +
 		"#           Vercel: production|preview|development（空なら production,preview）\n" +
 		"#           GitHub: named environment 名（空なら repo レベル）\n" +
+		"#           Cloudflare: Worker スクリプト名のサフィックス「<script>-<環境名>」（空ならベーススクリプト）\n" +
 		"#\n" +
 		"# !! 以下は init が生成した雛形です。secret は投入前に必ず見直すこと !!\n" +
 		"# !! NEXT_PUBLIC_ プレフィックスは secret: false、それ以外は secret: true を初期値としています。!!\n",
@@ -229,9 +268,16 @@ YAML スキーマ（定義ファイル env-sync.yaml）:
 	MsgSetupGitHubRepo:        "GitHub repo（owner/repo 形式）: ",
 	MsgSetupGitHubTokenEnvRef: "GitHub token を ${GITHUB_TOKEN} 環境変数参照で書きますか？（推奨）(Y/n): ",
 	MsgSetupGitHubTokenPlain:  "GitHub token（平文でファイルに書き込みます）: ",
+
+	MsgSetupAskCloudflare:         "Cloudflare Workers を設定しますか？ (Y/n): ",
+	MsgSetupCloudflareAccountID:   "Cloudflare account_id: ",
+	MsgSetupCloudflareScript:      "Cloudflare Worker スクリプト名（任意、Enter で wrangler 設定から取得）: ",
+	MsgSetupCloudflareTokenEnvRef: "Cloudflare token を ${CLOUDFLARE_API_TOKEN} 環境変数参照で書きますか？（推奨）(Y/n): ",
+	MsgSetupCloudflareTokenPlain:  "Cloudflare API token（平文でファイルに書き込みます）: ",
+
 	MsgSetupYAMLHeader: "# env-sync 認証情報 config\n" +
 		"# このファイルをコミットしないよう .gitignore に追記することを推奨します。\n" +
-		"# projects[] / repos[]（モノレポ向け複数ターゲット）は手で追記してください。\n",
+		"# projects[] / repos[] / scripts[]（モノレポ向け複数ターゲット）は手で追記してください。\n",
 
 	// ----- Vercel Provider -----
 	MsgVercelTokenMissing:           "VERCEL_TOKEN が未設定です（環境変数 VERCEL_TOKEN または config ファイルの vercel.token で指定してください）",
@@ -295,6 +341,29 @@ YAML スキーマ（定義ファイル env-sync.yaml）:
 	MsgGCPSecretLabelUpdateFail: "Secret のラベル更新に失敗: %s",
 	MsgGCPSecretVersionAddFail:  "Secret バージョンの追加に失敗: %s",
 
+	// ----- Cloudflare Provider -----
+	MsgCloudflareTokenMissing:       "CLOUDFLARE_API_TOKEN が未設定です（環境変数 CLOUDFLARE_API_TOKEN または config ファイルの cloudflare.api_token で指定してください）",
+	MsgCloudflareTokenMissingScript: "CLOUDFLARE_API_TOKEN が未設定です（ターゲット %q: 環境変数 CLOUDFLARE_API_TOKEN または config ファイルの api_token で指定してください）",
+	MsgCloudflareTokenSkipScript:    "✗ ターゲット %q: CLOUDFLARE_API_TOKEN が未設定です（このターゲットをスキップして続行します）\n",
+	MsgCloudflareAccountIDMissing:   "CLOUDFLARE_ACCOUNT_ID が未設定です（環境変数 CLOUDFLARE_ACCOUNT_ID または config ファイルの cloudflare.account_id で指定してください）",
+	MsgCloudflareScriptMissing: "Worker スクリプト名を解決できません" +
+		"（環境変数 CLOUDFLARE_SCRIPT_NAME、config ファイルの cloudflare.script、または wrangler.jsonc / wrangler.toml の name で指定してください）",
+	MsgCloudflareSkipNotSecret: "⚠ %s: secret=false のためスキップします（Cloudflare Workers provider はシークレットのみ同期します）\n",
+	MsgCloudflareVarsNote: "※ 平文の vars（secret: false）は同期しません。平文 vars は wrangler 設定の [vars] が管理しており、\n" +
+		"   次の `wrangler deploy` で上書きされて消えるためです。シークレットはデプロイをまたいで保持されます。\n",
+	MsgCloudflareTargetScript:          "同期先 Worker: %s  (env: %s, def: %s)\n",
+	MsgCloudflareConfirmSingle:         "上記を Cloudflare Workers に登録します（既存は上書き）。よろしいですか？ (y/N) ",
+	MsgCloudflareConfirmMulti:          "上記を %d 件の Cloudflare Workers ターゲットに登録します（既存は上書き）。よろしいですか？ (y/N) ",
+	MsgCloudflareScriptSeparator:       "\n--- ターゲット: %s ---\n",
+	MsgCloudflareExistingKeysFetchWarn: "警告: 既存シークレットの取得に失敗したため新規/更新の判定をスキップします: %s\n",
+	MsgCloudflareSecretsFetchFail:      "既存シークレット一覧の取得に失敗",
+	MsgCloudflareSecretsParseFail:      "既存シークレット一覧のパースに失敗",
+	MsgCloudflareURLBuildFailOut:       "✗ URL の組み立てに失敗: %s\n",
+	MsgCloudflareURLBuildFailInternal:  "URL の組み立てに失敗",
+	MsgCloudflareRequestCreateFailOut:  "✗ %s -> リクエスト生成に失敗: %s\n",
+	MsgCloudflareSendFailOut:           "✗ %s -> 送信に失敗: %s\n",
+	MsgCloudflareWranglerReadFail:      "wrangler 設定ファイルの読み込みに失敗: %s: %s",
+
 	// ----- Validate サブコマンド -----
 	MsgValidateHeader:               "=== validate: %s ===\n",
 	MsgValidateProviderUnsupported:  "  [スキップ] %s: validate 未対応\n",
@@ -320,6 +389,14 @@ YAML スキーマ（定義ファイル env-sync.yaml）:
 	MsgValidateVercelProjectID:      "  projectId : %s (取得元: %s)\n",
 	MsgValidateVercelTeamID:         "  teamId    : %s (取得元: %s)\n",
 	MsgValidateGitHubRepo:           "  repo      : %s (取得元: %s)\n",
+	MsgValidateSourceWrangler:       "wrangler 設定ファイル",
+	MsgValidateCloudflareAccountID:  "  accountId : %s (取得元: %s)\n",
+	MsgValidateCloudflareScript:     "  script    : %s (取得元: %s)\n",
+	MsgValidateAccountIDUnsetSkip:   "  accountId が未設定のため API 確認をスキップします\n",
+	MsgValidateScriptUnsetSkip:      "  script 名を解決できなかったため API 確認をスキップします\n",
+	MsgValidateCloudflareCause404:   "  推定原因: Worker スクリプトが存在しない、または accountId が誤っている\n",
+	MsgValidateCloudflareCause401:   "  推定原因: API トークンが無効\n",
+	MsgValidateCloudflareCause403:   "  推定原因: API トークンに Workers Scripts:Edit 権限が不足\n",
 
 	// ----- Sync / Entry 解決 -----
 	MsgDefaultsProviderInvalid: "defaults.provider: 不正な provider 値 %q（%s のいずれかを指定してください）",
