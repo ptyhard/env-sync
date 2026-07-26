@@ -188,7 +188,10 @@ func TestValidate_ShowsSourceLabels(t *testing.T) {
 	newRecordingServer(t, func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, `{"success":true,"result":[]}`) //nolint:errcheck
 	})
-	t.Setenv("CLOUDFLARE_API_TOKEN", "tok")
+	// トークン値は出力中の他の語（"token" ラベル等）と衝突しない文字列にする。
+	// 短い値にすると Contains がラベルに引っかかり、漏洩検知のアサーションが機能しなくなる。
+	const secretValue = "super-secret-token-value"
+	t.Setenv("CLOUDFLARE_API_TOKEN", secretValue)
 	t.Setenv("CLOUDFLARE_ACCOUNT_ID", "acct1")
 	t.Setenv("CLOUDFLARE_SCRIPT_NAME", "my-worker")
 
@@ -201,8 +204,12 @@ func TestValidate_ShowsSourceLabels(t *testing.T) {
 	}
 	got := out.String()
 	// トークンの値そのものは出力しない
-	if strings.Contains(got, "tok") && !strings.Contains(got, "[set]") {
-		t.Errorf("トークン値が出力されている可能性:\n%s", got)
+	if strings.Contains(got, secretValue) {
+		t.Errorf("トークン値が出力されている:\n%s", got)
+	}
+	// 値の代わりにマスク済みラベルが出ていること
+	if !strings.Contains(got, "[set]") {
+		t.Errorf("トークンが設定済みとして表示されていない:\n%s", got)
 	}
 	if !strings.Contains(got, "env var") {
 		t.Errorf("取得元ラベルが出力されていない:\n%s", got)

@@ -219,7 +219,7 @@ YAML schema (definition file env-sync.yaml):
 	MsgInitKeyCount:        "Keys: %d\n",
 	MsgInitKeyListHeader:   "Key list:\n",
 	MsgInitSecretNote:      "* Please review the secret field before deploying. Values are not written to the file.",
-	MsgInitYAMLHeader: "# Environment variables to register to Vercel / GitHub Actions.\n" +
+	MsgInitYAMLHeader: "# Environment variables to register to Vercel / GitHub Actions / GCP / Cloudflare Workers.\n" +
 		"#\n" +
 		"# Do not write values here (this file is committed to git). Values are read from .env(.production).\n" +
 		"# Keys not declared here will not be registered (keys in .env will be skipped with a warning).\n" +
