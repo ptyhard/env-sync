@@ -22,9 +22,10 @@ const projectAppConfigFile = ".env-sync.config.yaml"
 
 // AppConfig は global / project の config ファイルからロードした認証情報・ID を保持する。
 type AppConfig struct {
-	Vercel   AppVercelConfig `yaml:"vercel"`
-	GitHub   AppGitHubConfig `yaml:"github"`
-	Language string          `yaml:"language"` // 表示言語コード（"en" / "ja"）
+	Vercel     AppVercelConfig     `yaml:"vercel"`
+	GitHub     AppGitHubConfig     `yaml:"github"`
+	Cloudflare AppCloudflareConfig `yaml:"cloudflare"`
+	Language   string              `yaml:"language"` // 表示言語コード（"en" / "ja"）
 }
 
 // VercelProjectConf は vercel.projects の 1 件分の設定。
@@ -40,6 +41,15 @@ type GitHubRepoConf struct {
 	Name  string `yaml:"name"`
 	Repo  string `yaml:"repo"`
 	Token string `yaml:"token"`
+}
+
+// CloudflareScriptConf は cloudflare.scripts の 1 件分の設定。
+// Script は Worker のスクリプト名（wrangler 設定の name に相当）。
+type CloudflareScriptConf struct {
+	Name      string `yaml:"name"`
+	Script    string `yaml:"script"`
+	AccountID string `yaml:"account_id"`
+	APIToken  string `yaml:"api_token"`
 }
 
 // VercelTarget は ResolveVercelTargets が返す解決済みターゲット。
@@ -64,6 +74,20 @@ type GitHubTarget struct {
 	RepoSource  string // 取得元: "env" / "config" / "git_remote" / ""（未設定）
 }
 
+// CloudflareTarget は ResolveCloudflareTargets が返す解決済みターゲット。
+type CloudflareTarget struct {
+	// Name は config 上のターゲット名。単一解決の場合は空になる。
+	Name      string
+	Script    string
+	AccountID string
+	APIToken  string
+	// Environments は環境名 → Worker スクリプト名の明示マッピング（未定義なら nil）。
+	Environments    map[string]string
+	TokenSource     string // 取得元: "env" / "config" / ""（未設定）
+	ScriptSource    string // 取得元: "env" / "config" / "wrangler" / ""（未設定）
+	AccountIDSource string // 取得元: "env" / "config" / ""（未設定）
+}
+
 // AppVercelConfig は Vercel の認証情報・ID。
 type AppVercelConfig struct {
 	Token     string              `yaml:"token"`
@@ -77,6 +101,18 @@ type AppGitHubConfig struct {
 	Token string           `yaml:"token"`
 	Repo  string           `yaml:"repo"`
 	Repos []GitHubRepoConf `yaml:"repos"`
+}
+
+// AppCloudflareConfig は Cloudflare Workers の認証情報・ID。
+type AppCloudflareConfig struct {
+	APIToken  string                 `yaml:"api_token"`
+	AccountID string                 `yaml:"account_id"`
+	Script    string                 `yaml:"script"`
+	Scripts   []CloudflareScriptConf `yaml:"scripts"`
+	// Environments は環境名 → Worker スクリプト名の明示マッピング。
+	// ここに無い環境名は "<script>-<環境名>" 規約で解決される
+	// （wrangler が [env.staging] を my-worker-staging としてデプロイする挙動に合わせる）。
+	Environments map[string]string `yaml:"environments"`
 }
 
 // LoadAppConfig は global と project の設定ファイルをロードしてマージして返す。
@@ -125,7 +161,7 @@ func loadGlobalAppConfig() (AppConfig, error) {
 	if err != nil {
 		return AppConfig{}, err
 	}
-	if cfg.Vercel.Token != "" || cfg.GitHub.Token != "" || hasPerTargetToken(cfg) {
+	if cfg.Vercel.Token != "" || cfg.GitHub.Token != "" || cfg.Cloudflare.APIToken != "" || hasPerTargetToken(cfg) {
 		warnIfInsecurePermissions(path)
 	}
 	return cfg, nil
@@ -140,6 +176,11 @@ func hasPerTargetToken(cfg AppConfig) bool {
 	}
 	for _, r := range cfg.GitHub.Repos {
 		if r.Token != "" {
+			return true
+		}
+	}
+	for _, s := range cfg.Cloudflare.Scripts {
+		if s.APIToken != "" {
 			return true
 		}
 	}
@@ -189,6 +230,21 @@ func mergeAppConfig(global, project AppConfig) AppConfig {
 	}
 	if len(project.GitHub.Repos) > 0 {
 		merged.GitHub.Repos = project.GitHub.Repos
+	}
+	if project.Cloudflare.APIToken != "" {
+		merged.Cloudflare.APIToken = project.Cloudflare.APIToken
+	}
+	if project.Cloudflare.AccountID != "" {
+		merged.Cloudflare.AccountID = project.Cloudflare.AccountID
+	}
+	if project.Cloudflare.Script != "" {
+		merged.Cloudflare.Script = project.Cloudflare.Script
+	}
+	if len(project.Cloudflare.Scripts) > 0 {
+		merged.Cloudflare.Scripts = project.Cloudflare.Scripts
+	}
+	if len(project.Cloudflare.Environments) > 0 {
+		merged.Cloudflare.Environments = project.Cloudflare.Environments
 	}
 	if project.Language != "" {
 		merged.Language = project.Language
@@ -240,6 +296,9 @@ func expandAppConfigRefs(cfg *AppConfig) error {
 		&cfg.Vercel.TeamID,
 		&cfg.GitHub.Token,
 		&cfg.GitHub.Repo,
+		&cfg.Cloudflare.APIToken,
+		&cfg.Cloudflare.AccountID,
+		&cfg.Cloudflare.Script,
 	}
 	for _, f := range fields {
 		expanded, err := expandEnvRefs(*f)
@@ -275,6 +334,28 @@ func expandAppConfigRefs(cfg *AppConfig) error {
 			}
 			*f = expanded
 		}
+	}
+	for i := range cfg.Cloudflare.Scripts {
+		sfields := []*string{
+			&cfg.Cloudflare.Scripts[i].APIToken,
+			&cfg.Cloudflare.Scripts[i].AccountID,
+			&cfg.Cloudflare.Scripts[i].Script,
+		}
+		for _, f := range sfields {
+			expanded, err := expandEnvRefs(*f)
+			if err != nil {
+				return err
+			}
+			*f = expanded
+		}
+	}
+	// environments は環境名 → スクリプト名のマップ。値（スクリプト名）のみ展開する。
+	for k, v := range cfg.Cloudflare.Environments {
+		expanded, err := expandEnvRefs(v)
+		if err != nil {
+			return err
+		}
+		cfg.Cloudflare.Environments[k] = expanded
 	}
 	return nil
 }
@@ -581,6 +662,141 @@ func validateGitHubRepoConfs(repos []GitHubRepoConf) error {
 		seen[r.Name] = true
 		if r.Repo == "" {
 			return fmt.Errorf("%s", i18n.T(i18n.MsgGitHubRepoRepoRequired, r.Name))
+		}
+	}
+	return nil
+}
+
+// ResolveCloudflareAPIToken は 環境変数 > config の優先順位で Cloudflare API トークンを返す。
+func (cfg *AppConfig) ResolveCloudflareAPIToken() string {
+	v, _ := cfg.ResolveCloudflareAPITokenWithSource()
+	return v
+}
+
+// ResolveCloudflareAPITokenWithSource は API トークンとその取得元 ("env"/"config"/"") を返す。
+func (cfg *AppConfig) ResolveCloudflareAPITokenWithSource() (val, source string) {
+	if v := os.Getenv("CLOUDFLARE_API_TOKEN"); v != "" {
+		return v, "env"
+	}
+	if cfg.Cloudflare.APIToken != "" {
+		return cfg.Cloudflare.APIToken, "config"
+	}
+	return "", ""
+}
+
+// ResolveCloudflareAccountIDWithSource は アカウント ID とその取得元 ("env"/"config"/"") を返す。
+func (cfg *AppConfig) ResolveCloudflareAccountIDWithSource() (val, source string) {
+	if v := os.Getenv("CLOUDFLARE_ACCOUNT_ID"); v != "" {
+		return v, "env"
+	}
+	if cfg.Cloudflare.AccountID != "" {
+		return cfg.Cloudflare.AccountID, "config"
+	}
+	return "", ""
+}
+
+// ResolveCloudflareScriptWithSource は Worker スクリプト名とその取得元 ("env"/"config"/"") を返す。
+// ここでは wrangler 設定ファイルへのフォールバックは行わない（provider 側の責務）。
+func (cfg *AppConfig) ResolveCloudflareScriptWithSource() (val, source string) {
+	if v := os.Getenv("CLOUDFLARE_SCRIPT_NAME"); v != "" {
+		return v, "env"
+	}
+	if cfg.Cloudflare.Script != "" {
+		return cfg.Cloudflare.Script, "config"
+	}
+	return "", ""
+}
+
+// resolveCloudflareAPITokenWithSource はトークンと取得元を返す（per-target > 環境変数 > top-level config）。
+func (cfg *AppConfig) resolveCloudflareAPITokenWithSource(perTargetToken string) (string, string) {
+	if perTargetToken != "" {
+		return perTargetToken, "config"
+	}
+	return cfg.ResolveCloudflareAPITokenWithSource()
+}
+
+// resolveCloudflareAccountIDWithSource はアカウント ID と取得元を返す（per-target > 環境変数 > top-level config）。
+func (cfg *AppConfig) resolveCloudflareAccountIDWithSource(perTargetAccountID string) (string, string) {
+	if perTargetAccountID != "" {
+		return perTargetAccountID, "config"
+	}
+	return cfg.ResolveCloudflareAccountIDWithSource()
+}
+
+// ResolveCloudflareTargets は cloudflare.scripts の設定から解決済み CloudflareTarget スライスを返す。
+//
+// selectName が空でない場合は name 一致の 1 件のみ返す。一致しない場合はエラー。
+// scripts が未定義（空スライス）の場合は単一解決（環境変数 > config）で 1 件返す。
+// ただし selectName が指定されているのに scripts が未定義の場合はエラーを返す。
+func (cfg *AppConfig) ResolveCloudflareTargets(selectName string) ([]CloudflareTarget, error) {
+	if len(cfg.Cloudflare.Scripts) == 0 {
+		// selectName が指定されているのに scripts が未定義は設定ミスのためエラー
+		if selectName != "" {
+			return nil, fmt.Errorf("%s", i18n.T(i18n.MsgCloudflareScriptsNotDefined))
+		}
+		tok, tokSrc := cfg.ResolveCloudflareAPITokenWithSource()
+		acct, acctSrc := cfg.ResolveCloudflareAccountIDWithSource()
+		script, scriptSrc := cfg.ResolveCloudflareScriptWithSource()
+		return []CloudflareTarget{
+			{
+				Script:          script,
+				ScriptSource:    scriptSrc,
+				AccountID:       acct,
+				AccountIDSource: acctSrc,
+				APIToken:        tok,
+				TokenSource:     tokSrc,
+				Environments:    cfg.Cloudflare.Environments,
+			},
+		}, nil
+	}
+
+	// name・script の必須チェックと重複チェック（selectName の有無によらず常に実施）。
+	// scripts が定義されている場合は wrangler 設定ファイルへのフォールバックを行わないため
+	// 各エントリの script が必須となる（絞り込み後の件数に関わらず全エントリを検証する）。
+	if err := validateCloudflareScriptConfs(cfg.Cloudflare.Scripts); err != nil {
+		return nil, err
+	}
+
+	var targets []CloudflareTarget
+	for _, s := range cfg.Cloudflare.Scripts {
+		if selectName != "" && s.Name != selectName {
+			continue
+		}
+		tok, tokSrc := cfg.resolveCloudflareAPITokenWithSource(s.APIToken)
+		acct, acctSrc := cfg.resolveCloudflareAccountIDWithSource(s.AccountID)
+		targets = append(targets, CloudflareTarget{
+			Name:            s.Name,
+			Script:          s.Script,
+			ScriptSource:    "config",
+			AccountID:       acct,
+			AccountIDSource: acctSrc,
+			APIToken:        tok,
+			TokenSource:     tokSrc,
+			Environments:    cfg.Cloudflare.Environments,
+		})
+	}
+
+	if selectName != "" && len(targets) == 0 {
+		return nil, fmt.Errorf("%s", i18n.T(i18n.MsgCloudflareScriptNameNotFound, selectName))
+	}
+	return targets, nil
+}
+
+// validateCloudflareScriptConfs は cloudflare.scripts の name 必須・重複チェックおよび
+// script 必須チェックを行う。scripts が定義されている場合は wrangler 設定ファイルへの
+// フォールバックを使わないため、絞り込み後の件数に関わらず全エントリの script が必須。
+func validateCloudflareScriptConfs(scripts []CloudflareScriptConf) error {
+	seen := make(map[string]bool, len(scripts))
+	for _, s := range scripts {
+		if s.Name == "" {
+			return fmt.Errorf("%s", i18n.T(i18n.MsgCloudflareScriptNameRequired))
+		}
+		if seen[s.Name] {
+			return fmt.Errorf("%s", i18n.T(i18n.MsgCloudflareScriptNameDuplicate, s.Name))
+		}
+		seen[s.Name] = true
+		if s.Script == "" {
+			return fmt.Errorf("%s", i18n.T(i18n.MsgCloudflareScriptRequired, s.Name))
 		}
 	}
 	return nil

@@ -20,7 +20,7 @@ var enCatalog = map[MsgKey]string{
 	MsgSkipNoValueInEnv:          "⚠ %s: defined but no value in %s, skipping\n",
 	MsgSkipNotDefined:            "⚠ %s: in %s but not defined, skipping\n",
 	MsgSkipNoMatchingEnvironment: "⚠ %s: no matching environments after --environments filter, skipping\n",
-	MsgUsage: `env-sync - sync environment variables declared in a definition file to Vercel or GitHub Actions
+	MsgUsage: `env-sync - sync environment variables declared in a definition file to Vercel, GitHub Actions, GCP or Cloudflare Workers
 
 Subcommands:
   init      generate env-sync.yaml template from .env
@@ -30,6 +30,7 @@ Subcommands:
 Usage:
   VERCEL_TOKEN=xxxxx env-sync [options]
   GITHUB_TOKEN=xxxxx env-sync --provider github [options]
+  CLOUDFLARE_API_TOKEN=xxxxx env-sync --provider cloudflare [options]
   env-sync init [--env <file>] [--def <file>] [--force]
   env-sync setup [--global] [--force]
 
@@ -45,6 +46,8 @@ Options (sync):
                             when combined with --prune: deletion scope is also limited to the specified environments
   --vercel-project <name>   sync only the named project from config vercel.projects (monorepo)
   --github-repo <name>      sync only the named repo from config github.repos (monorepo)
+  --cloudflare-script <name>
+                            sync only the named target from config cloudflare.scripts (monorepo)
   --lang <code>             display language (en / ja, default: en)
   --version                 show version and exit
   -h, --help                show this help
@@ -78,6 +81,16 @@ Environment variables (GCP):
         Set GOOGLE_APPLICATION_CREDENTIALS for a service account key,
         or run gcloud auth application-default login to configure ADC.
 
+Environment variables (Cloudflare Workers):
+  CLOUDFLARE_API_TOKEN   Cloudflare API token with the Workers Scripts:Edit permission (required, not needed for dry-run)
+  CLOUDFLARE_ACCOUNT_ID  target account ID; if not set, read from config file
+  CLOUDFLARE_SCRIPT_NAME Worker script name; if not set, read from config file or the name field
+                         of wrangler.jsonc / wrangler.json / wrangler.toml
+  * Only secrets are synced. Plain text vars (secret: false) are skipped because the [vars] section
+    of your wrangler config owns them and would overwrite API-set values on the next deploy.
+  * environments map to separate Worker scripts as "<script>-<environment>" (wrangler's [env.X] convention).
+    Override the mapping with cloudflare.environments in the config file.
+
 Environment variables (language):
   ENV_SYNC_LANG  display language code (en / ja). Lower priority than --lang flag.
 
@@ -94,6 +107,12 @@ Config file (alternative to environment variables):
     github:
       token: <GitHub token>
       repo:  <owner/repo>
+    cloudflare:
+      api_token:  <Cloudflare API token>
+      account_id: <account ID>
+      script:     <Worker script name (optional; falls back to wrangler config)>
+      environments:                 # optional: environment name -> Worker script name
+        staging: my-worker-staging
 
   Schema (monorepo: multiple projects / repos):
     vercel:
@@ -114,19 +133,32 @@ Config file (alternative to environment variables):
         - name: backend
           repo: org/backend
           token: <per-repo token (optional)>
+    cloudflare:
+      api_token: <default token (can override per-script)>
+      account_id: <default account ID>
+      scripts:
+        - name: api
+          script: my-api-worker
+        - name: cron
+          script: my-cron-worker
+          api_token: <per-script token (optional)>
+          account_id: <per-script account ID (optional)>
 
   * If the global config contains tokens and the file permission is not 0600, a warning is shown.
 
 YAML schema (definition file env-sync.yaml):
   prune: true|false   whether to delete remote variables not in variables (default: false)
                       Vercel: env vars / GitHub: Actions Secrets & Variables /
-                      GCP: only Secrets labeled managed-by=env-sync
+                      GCP: only Secrets labeled managed-by=env-sync /
+                      Cloudflare: Worker secrets on the target scripts
   secret: true|false  whether to register as a secret (default: true)
                       Vercel: true→sensitive / false→plain
                       GitHub: true→Secret / false→Variable
+                      Cloudflare: true→secret / false→skipped (managed by wrangler [vars])
   environments: []    array of target environments
                       Vercel: production|preview|development (empty → production,preview)
                       GitHub: named environment name (empty → repo level)
+                      Cloudflare: Worker script suffix "<script>-<environment>" (empty → base script)
                       * GitHub named environments must be created in advance
   language: en        display language (en / ja). Lower priority than --lang flag and ENV_SYNC_LANG.
 `,
@@ -173,6 +205,12 @@ YAML schema (definition file env-sync.yaml):
 	MsgGitHubRepoNameDuplicate:    "duplicate name %q in github.repos",
 	MsgGitHubRepoRepoRequired:     "entry %q in github.repos requires repo",
 
+	MsgCloudflareScriptsNotDefined:   "--cloudflare-script was specified but cloudflare.scripts is not defined in config",
+	MsgCloudflareScriptNameNotFound:  "specified cloudflare target name %q is not defined in config",
+	MsgCloudflareScriptNameRequired:  "each entry in cloudflare.scripts must have a name",
+	MsgCloudflareScriptNameDuplicate: "duplicate name %q in cloudflare.scripts",
+	MsgCloudflareScriptRequired:      "entry %q in cloudflare.scripts requires script",
+
 	// ----- Init サブコマンド -----
 	MsgInitEnvFileReadFail: "failed to read env file: %s: %s",
 	MsgFileExists:          "already exists: %s (use --force to overwrite)",
@@ -181,17 +219,18 @@ YAML schema (definition file env-sync.yaml):
 	MsgInitKeyCount:        "Keys: %d\n",
 	MsgInitKeyListHeader:   "Key list:\n",
 	MsgInitSecretNote:      "* Please review the secret field before deploying. Values are not written to the file.",
-	MsgInitYAMLHeader: "# Environment variables to register to Vercel / GitHub Actions.\n" +
+	MsgInitYAMLHeader: "# Environment variables to register to Vercel / GitHub Actions / GCP / Cloudflare Workers.\n" +
 		"#\n" +
 		"# Do not write values here (this file is committed to git). Values are read from .env(.production).\n" +
 		"# Keys not declared here will not be registered (keys in .env will be skipped with a warning).\n" +
 		"#\n" +
 		"#   secret: true|false\n" +
-		"#           - true  : register as secret (Vercel: sensitive / GitHub: Secret)\n" +
-		"#           - false : register as plain text (Vercel: plain / GitHub: Variable)\n" +
+		"#           - true  : register as secret (Vercel: sensitive / GitHub: Secret / Cloudflare: Worker Secret)\n" +
+		"#           - false : register as plain text (Vercel: plain / GitHub: Variable / Cloudflare: skipped)\n" +
 		"#   environments: []  array of target environments\n" +
 		"#           Vercel: production|preview|development (empty → production,preview)\n" +
 		"#           GitHub: named environment name (empty → repo level)\n" +
+		"#           Cloudflare: Worker script suffix \"<script>-<environment>\" (empty → base script)\n" +
 		"#\n" +
 		"# !! The following is a template generated by init. Review secret before deploying !!\n" +
 		"# !! NEXT_PUBLIC_ prefix defaults to secret: false; all others default to secret: true !!\n",
@@ -229,9 +268,17 @@ YAML schema (definition file env-sync.yaml):
 	MsgSetupGitHubRepo:        "GitHub repo (owner/repo format): ",
 	MsgSetupGitHubTokenEnvRef: "Write GitHub token as ${GITHUB_TOKEN} env reference? (recommended) (Y/n): ",
 	MsgSetupGitHubTokenPlain:  "GitHub token (will be written in plaintext): ",
+
+	MsgSetupAskCloudflare:       "Configure Cloudflare Workers? (Y/n): ",
+	MsgSetupCloudflareAccountID: "Cloudflare account_id: ",
+	MsgSetupCloudflareScript:    "Cloudflare Worker script name (optional, press Enter to read from wrangler config): ",
+	MsgSetupCloudflareTokenEnvRef: "Write Cloudflare token as ${CLOUDFLARE_API_TOKEN} env reference? " +
+		"(recommended) (Y/n): ",
+	MsgSetupCloudflareTokenPlain: "Cloudflare API token (will be written in plaintext): ",
+
 	MsgSetupYAMLHeader: "# env-sync auth config\n" +
 		"# It is recommended to add this file to .gitignore.\n" +
-		"# Add projects[] / repos[] (for monorepo multi-target) manually.\n",
+		"# Add projects[] / repos[] / scripts[] (for monorepo multi-target) manually.\n",
 
 	// ----- Vercel Provider -----
 	MsgVercelTokenMissing:           "VERCEL_TOKEN is not set (set VERCEL_TOKEN env var or vercel.token in config file)",
@@ -295,6 +342,29 @@ YAML schema (definition file env-sync.yaml):
 	MsgGCPSecretLabelUpdateFail: "failed to update Secret labels: %s",
 	MsgGCPSecretVersionAddFail:  "failed to add Secret version: %s",
 
+	// ----- Cloudflare Provider -----
+	MsgCloudflareTokenMissing:       "CLOUDFLARE_API_TOKEN is not set (set CLOUDFLARE_API_TOKEN env var or cloudflare.api_token in config file)",
+	MsgCloudflareTokenMissingScript: "CLOUDFLARE_API_TOKEN is not set (target %q: set CLOUDFLARE_API_TOKEN env var or api_token in config file)",
+	MsgCloudflareTokenSkipScript:    "✗ target %q: CLOUDFLARE_API_TOKEN is not set (skipping this target and continuing)\n",
+	MsgCloudflareAccountIDMissing:   "CLOUDFLARE_ACCOUNT_ID is not set (set CLOUDFLARE_ACCOUNT_ID env var or cloudflare.account_id in config file)",
+	MsgCloudflareScriptMissing: "Worker script name could not be resolved " +
+		"(set CLOUDFLARE_SCRIPT_NAME env var, cloudflare.script in config file, or name in wrangler.jsonc / wrangler.toml)",
+	MsgCloudflareSkipNotSecret: "⚠ %s: secret=false, skipping (Cloudflare Workers provider syncs secrets only)\n",
+	MsgCloudflareVarsNote: "* Plain text vars (secret: false) are not synced: they are owned by the [vars] section of your\n" +
+		"  wrangler config and would be overwritten on the next `wrangler deploy`. Secrets are preserved across deploys.\n",
+	MsgCloudflareTargetScript:          "Target Worker: %s  (env: %s, def: %s)\n",
+	MsgCloudflareConfirmSingle:         "Register the above to Cloudflare Workers (existing will be overwritten). Continue? (y/N) ",
+	MsgCloudflareConfirmMulti:          "Register the above to %d Cloudflare Workers targets (existing will be overwritten). Continue? (y/N) ",
+	MsgCloudflareScriptSeparator:       "\n--- target: %s ---\n",
+	MsgCloudflareExistingKeysFetchWarn: "Warning: failed to fetch existing secrets, skipping new/update classification: %s\n",
+	MsgCloudflareSecretsFetchFail:      "failed to fetch existing secrets",
+	MsgCloudflareSecretsParseFail:      "failed to parse existing secrets response",
+	MsgCloudflareURLBuildFailOut:       "✗ failed to build URL: %s\n",
+	MsgCloudflareURLBuildFailInternal:  "failed to build URL",
+	MsgCloudflareRequestCreateFailOut:  "✗ %s -> failed to create request: %s\n",
+	MsgCloudflareSendFailOut:           "✗ %s -> failed to send: %s\n",
+	MsgCloudflareWranglerReadFail:      "failed to read wrangler config: %s: %s",
+
 	// ----- Validate サブコマンド -----
 	MsgValidateHeader:               "=== validate: %s ===\n",
 	MsgValidateProviderUnsupported:  "  [skip] %s: validate not supported\n",
@@ -320,6 +390,14 @@ YAML schema (definition file env-sync.yaml):
 	MsgValidateVercelProjectID:      "  projectId : %s (source: %s)\n",
 	MsgValidateVercelTeamID:         "  teamId    : %s (source: %s)\n",
 	MsgValidateGitHubRepo:           "  repo      : %s (source: %s)\n",
+	MsgValidateSourceWrangler:       "wrangler config",
+	MsgValidateCloudflareAccountID:  "  accountId : %s (source: %s)\n",
+	MsgValidateCloudflareScript:     "  script    : %s (source: %s)\n",
+	MsgValidateAccountIDUnsetSkip:   "  accountId is not set, skipping API check\n",
+	MsgValidateScriptUnsetSkip:      "  script name could not be resolved, skipping API check\n",
+	MsgValidateCloudflareCause404:   "  Possible cause: the Worker script does not exist, or accountId is wrong\n",
+	MsgValidateCloudflareCause401:   "  Possible cause: API token is invalid\n",
+	MsgValidateCloudflareCause403:   "  Possible cause: API token lacks the Workers Scripts:Edit permission\n",
 
 	// ----- Sync / Entry 解決 -----
 	MsgDefaultsProviderInvalid: "defaults.provider: invalid provider value %q (must be one of: %s)",

@@ -5,13 +5,14 @@ import (
 
 	"github.com/ptyhard/env-sync/internal/provider"
 
+	_ "github.com/ptyhard/env-sync/internal/provider/cloudflare"
 	_ "github.com/ptyhard/env-sync/internal/provider/github"
 	_ "github.com/ptyhard/env-sync/internal/provider/vercel"
 )
 
-// TestRegistry_VercelGitHubRegistered は vercel/github が registry に登録されているかを確認する。
-func TestRegistry_VercelGitHubRegistered(t *testing.T) {
-	for _, name := range []string{"vercel", "github"} {
+// TestRegistry_ProvidersRegistered は vercel/github/cloudflare が registry に登録されているかを確認する。
+func TestRegistry_ProvidersRegistered(t *testing.T) {
+	for _, name := range []string{"vercel", "github", "cloudflare"} {
 		p, ok := provider.LookupProvider(name)
 		if !ok {
 			t.Errorf("LookupProvider(%q): ok = false, want true", name)
@@ -31,24 +32,19 @@ func TestRegistry_UnknownProvider(t *testing.T) {
 	}
 }
 
-// TestRegisteredProviderNames_Contains は RegisteredProviderNames が vercel / github を含むことを確認する。
+// TestRegisteredProviderNames_Contains は RegisteredProviderNames が
+// vercel / github / cloudflare を含むことを確認する。
 // init() 実行順は Go 仕様で保証されないため、順序ではなく存在のみを検証する。
 func TestRegisteredProviderNames_Contains(t *testing.T) {
 	names := provider.RegisteredProviderNames()
-	foundVercel, foundGitHub := false, false
+	found := map[string]bool{}
 	for _, n := range names {
-		switch n {
-		case "vercel":
-			foundVercel = true
-		case "github":
-			foundGitHub = true
+		found[n] = true
+	}
+	for _, want := range []string{"vercel", "github", "cloudflare"} {
+		if !found[want] {
+			t.Errorf("%s が RegisteredProviderNames に含まれない", want)
 		}
-	}
-	if !foundVercel {
-		t.Error("vercel が RegisteredProviderNames に含まれない")
-	}
-	if !foundGitHub {
-		t.Error("github が RegisteredProviderNames に含まれない")
 	}
 }
 

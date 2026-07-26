@@ -126,6 +126,16 @@ const (
 	MsgGitHubRepoNameDuplicate MsgKey = "config.github_repo_name_dup"
 	// MsgGitHubRepoRepoRequired は github.repos の repo 必須エラー（書式: 名前）。
 	MsgGitHubRepoRepoRequired MsgKey = "config.github_repo_repo_req"
+	// MsgCloudflareScriptsNotDefined は cloudflare.scripts 未定義で --cloudflare-script 指定時のエラー。
+	MsgCloudflareScriptsNotDefined MsgKey = "config.cloudflare_scripts_undef"
+	// MsgCloudflareScriptNameNotFound は指定ターゲット名が config に無いエラー（書式: 名前）。
+	MsgCloudflareScriptNameNotFound MsgKey = "config.cloudflare_script_not_found"
+	// MsgCloudflareScriptNameRequired は cloudflare.scripts の name 必須エラー。
+	MsgCloudflareScriptNameRequired MsgKey = "config.cloudflare_script_name_req"
+	// MsgCloudflareScriptNameDuplicate は cloudflare.scripts の name 重複エラー（書式: 名前）。
+	MsgCloudflareScriptNameDuplicate MsgKey = "config.cloudflare_script_name_dup"
+	// MsgCloudflareScriptRequired は cloudflare.scripts の script 必須エラー（書式: 名前）。
+	MsgCloudflareScriptRequired MsgKey = "config.cloudflare_script_req"
 
 	// ----- Init サブコマンド -----
 
@@ -186,6 +196,16 @@ const (
 	MsgSetupGitHubTokenPlain MsgKey = "setup.github_token_plain"
 	// MsgSetupYAMLHeader は BuildSetupYAML が生成するコメントヘッダブロック。
 	MsgSetupYAMLHeader MsgKey = "setup.yaml_header"
+	// MsgSetupAskCloudflare は Cloudflare 設定を使うか確認プロンプト。
+	MsgSetupAskCloudflare MsgKey = "setup.ask_cloudflare"
+	// MsgSetupCloudflareAccountID は Cloudflare account_id 入力プロンプト。
+	MsgSetupCloudflareAccountID MsgKey = "setup.cloudflare_account_id"
+	// MsgSetupCloudflareScript は Cloudflare Worker スクリプト名の入力プロンプト。
+	MsgSetupCloudflareScript MsgKey = "setup.cloudflare_script"
+	// MsgSetupCloudflareTokenEnvRef は Cloudflare API トークンを環境変数参照にするか確認プロンプト。
+	MsgSetupCloudflareTokenEnvRef MsgKey = "setup.cloudflare_token_env_ref"
+	// MsgSetupCloudflareTokenPlain は Cloudflare API トークンを平文で入力するプロンプト。
+	MsgSetupCloudflareTokenPlain MsgKey = "setup.cloudflare_token_plain"
 
 	// ----- Vercel Provider -----
 
@@ -309,6 +329,47 @@ const (
 	// MsgGCPSecretVersionAddFail は Secret バージョン追加失敗（書式: エラー）。
 	MsgGCPSecretVersionAddFail MsgKey = "gcp.secret_version_add_fail"
 
+	// ----- Cloudflare Provider -----
+
+	// MsgCloudflareTokenMissing は CLOUDFLARE_API_TOKEN 未設定エラー（単一ターゲット時）。
+	MsgCloudflareTokenMissing MsgKey = "cloudflare.token_missing"
+	// MsgCloudflareTokenMissingScript は per-target API トークン未設定エラー（書式: ターゲット名）。
+	MsgCloudflareTokenMissingScript MsgKey = "cloudflare.token_missing_script"
+	// MsgCloudflareTokenSkipScript は複数ターゲット時のトークン未設定スキップ警告（書式: ターゲット名）。
+	MsgCloudflareTokenSkipScript MsgKey = "cloudflare.token_skip_script"
+	// MsgCloudflareAccountIDMissing は CLOUDFLARE_ACCOUNT_ID 未設定エラー。
+	MsgCloudflareAccountIDMissing MsgKey = "cloudflare.account_id_missing"
+	// MsgCloudflareScriptMissing は Worker スクリプト名が解決できないエラー。
+	MsgCloudflareScriptMissing MsgKey = "cloudflare.script_missing"
+	// MsgCloudflareSkipNotSecret は secret=false エントリのスキップ警告（書式: キー名）。
+	MsgCloudflareSkipNotSecret MsgKey = "cloudflare.skip_not_secret"
+	// MsgCloudflareVarsNote は平文 vars が同期対象外である理由の注記。
+	MsgCloudflareVarsNote MsgKey = "cloudflare.vars_note"
+	// MsgCloudflareTargetScript は同期先 Worker 表示（書式: ラベル, envファイル, defファイル）。
+	MsgCloudflareTargetScript MsgKey = "cloudflare.target_script"
+	// MsgCloudflareConfirmSingle は単一ターゲット送信確認プロンプト。
+	MsgCloudflareConfirmSingle MsgKey = "cloudflare.confirm_single"
+	// MsgCloudflareConfirmMulti は複数ターゲット送信確認プロンプト（書式: 件数）。
+	MsgCloudflareConfirmMulti MsgKey = "cloudflare.confirm_multi"
+	// MsgCloudflareScriptSeparator は複数ターゲット時のセパレータ（書式: ターゲットラベル）。
+	MsgCloudflareScriptSeparator MsgKey = "cloudflare.script_separator"
+	// MsgCloudflareExistingKeysFetchWarn は既存シークレット名取得失敗の警告（書式: エラー）。
+	MsgCloudflareExistingKeysFetchWarn MsgKey = "cloudflare.existing_keys_warn"
+	// MsgCloudflareSecretsFetchFail は既存シークレット一覧取得失敗ラベル（%w ラップ用）。
+	MsgCloudflareSecretsFetchFail MsgKey = "cloudflare.secrets_fetch_fail"
+	// MsgCloudflareSecretsParseFail は既存シークレット一覧のパース失敗ラベル（%w ラップ用）。
+	MsgCloudflareSecretsParseFail MsgKey = "cloudflare.secrets_parse_fail"
+	// MsgCloudflareURLBuildFailOut は URL 組み立て失敗の出力（書式: エラー）。
+	MsgCloudflareURLBuildFailOut MsgKey = "cloudflare.url_build_fail_out"
+	// MsgCloudflareURLBuildFailInternal は内部 URL 組み立て失敗ラベル（%w ラップ用）。
+	MsgCloudflareURLBuildFailInternal MsgKey = "cloudflare.url_build_fail_internal"
+	// MsgCloudflareRequestCreateFailOut はリクエスト生成失敗の出力（書式: キー名, エラー）。
+	MsgCloudflareRequestCreateFailOut MsgKey = "cloudflare.request_create_fail_out"
+	// MsgCloudflareSendFailOut は送信失敗の出力（書式: キー名, エラー）。
+	MsgCloudflareSendFailOut MsgKey = "cloudflare.send_fail_out"
+	// MsgCloudflareWranglerReadFail は wrangler 設定ファイルの読み込み失敗（書式: パス, エラー）。
+	MsgCloudflareWranglerReadFail MsgKey = "cloudflare.wrangler_read_fail"
+
 	// ----- Validate サブコマンド -----
 
 	// MsgValidateHeader は validate のターゲットヘッダ（書式: ターゲットラベル = name / projectId / owner-repo など）。
@@ -359,6 +420,22 @@ const (
 	MsgValidateVercelTeamID MsgKey = "validate.vercel_team_id"
 	// MsgValidateGitHubRepo は GitHub リポジトリの表示（書式: owner/repo, 取得元）。
 	MsgValidateGitHubRepo MsgKey = "validate.github_repo"
+	// MsgValidateSourceWrangler は取得元が wrangler 設定ファイルであることを示すラベル。
+	MsgValidateSourceWrangler MsgKey = "validate.source_wrangler"
+	// MsgValidateCloudflareAccountID は Cloudflare アカウント ID の表示（書式: ID, 取得元）。
+	MsgValidateCloudflareAccountID MsgKey = "validate.cloudflare_account_id"
+	// MsgValidateCloudflareScript は Cloudflare Worker スクリプト名の表示（書式: 名前, 取得元）。
+	MsgValidateCloudflareScript MsgKey = "validate.cloudflare_script"
+	// MsgValidateAccountIDUnsetSkip は account_id 未設定のため API 確認をスキップするメッセージ。
+	MsgValidateAccountIDUnsetSkip MsgKey = "validate.account_id_unset_skip"
+	// MsgValidateScriptUnsetSkip は script 名未解決のため API 確認をスキップするメッセージ。
+	MsgValidateScriptUnsetSkip MsgKey = "validate.script_unset_skip"
+	// MsgValidateCloudflareCause404 は Cloudflare 404 の推定原因。
+	MsgValidateCloudflareCause404 MsgKey = "validate.cloudflare_cause_404"
+	// MsgValidateCloudflareCause401 は Cloudflare 401 の推定原因。
+	MsgValidateCloudflareCause401 MsgKey = "validate.cloudflare_cause_401"
+	// MsgValidateCloudflareCause403 は Cloudflare 403 の推定原因。
+	MsgValidateCloudflareCause403 MsgKey = "validate.cloudflare_cause_403"
 	// ----- Sync / Entry 解決 -----
 
 	// MsgDefaultsProviderInvalid は defaults.provider の不正値エラー（書式: 値, 候補一覧）。

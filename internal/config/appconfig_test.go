@@ -1390,3 +1390,160 @@ func TestResolveGitHubTargets_SourceFields_MultiTarget(t *testing.T) {
 		t.Errorf("targets[1].TokenSource = %q, want config", targets[1].TokenSource)
 	}
 }
+
+// --- Cloudflare ターゲット解決のテスト ---
+
+// clearCloudflareEnv は Cloudflare 関連の環境変数をテスト中だけ空にする。
+func clearCloudflareEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("CLOUDFLARE_API_TOKEN", "")
+	t.Setenv("CLOUDFLARE_ACCOUNT_ID", "")
+	t.Setenv("CLOUDFLARE_SCRIPT_NAME", "")
+}
+
+func TestResolveCloudflareTargets_NoScripts_BackwardCompat(t *testing.T) {
+	// scripts 未定義なら単一解決で 1 件返す
+	clearCloudflareEnv(t)
+	cfg := &config.AppConfig{}
+	cfg.Cloudflare.APIToken = "cfg-token"
+	cfg.Cloudflare.AccountID = "cfg-account"
+	cfg.Cloudflare.Script = "cfg-worker"
+
+	targets, err := cfg.ResolveCloudflareTargets("")
+	if err != nil {
+		t.Fatalf("エラーなしを期待: %v", err)
+	}
+	if len(targets) != 1 {
+		t.Fatalf("targets len = %d, want 1", len(targets))
+	}
+	if targets[0].APIToken != "cfg-token" || targets[0].TokenSource != "config" {
+		t.Errorf("token = %q (source %q), want cfg-token (config)", targets[0].APIToken, targets[0].TokenSource)
+	}
+	if targets[0].AccountID != "cfg-account" || targets[0].Script != "cfg-worker" {
+		t.Errorf("account/script = %q/%q, want cfg-account/cfg-worker", targets[0].AccountID, targets[0].Script)
+	}
+}
+
+func TestResolveCloudflareTargets_EnvOverridesConfig(t *testing.T) {
+	// 環境変数が config より優先される
+	clearCloudflareEnv(t)
+	t.Setenv("CLOUDFLARE_API_TOKEN", "env-token")
+	t.Setenv("CLOUDFLARE_ACCOUNT_ID", "env-account")
+	t.Setenv("CLOUDFLARE_SCRIPT_NAME", "env-worker")
+	cfg := &config.AppConfig{}
+	cfg.Cloudflare.APIToken = "cfg-token"
+	cfg.Cloudflare.AccountID = "cfg-account"
+	cfg.Cloudflare.Script = "cfg-worker"
+
+	targets, err := cfg.ResolveCloudflareTargets("")
+	if err != nil {
+		t.Fatalf("エラーなしを期待: %v", err)
+	}
+	if targets[0].APIToken != "env-token" || targets[0].TokenSource != "env" {
+		t.Errorf("token = %q (source %q), want env-token (env)", targets[0].APIToken, targets[0].TokenSource)
+	}
+	if targets[0].Script != "env-worker" || targets[0].ScriptSource != "env" {
+		t.Errorf("script = %q (source %q), want env-worker (env)", targets[0].Script, targets[0].ScriptSource)
+	}
+}
+
+func TestResolveCloudflareTargets_AllScripts(t *testing.T) {
+	// scripts が定義されている場合、全件を CloudflareTarget として返す
+	clearCloudflareEnv(t)
+	cfg := &config.AppConfig{}
+	cfg.Cloudflare.APIToken = "top-token"
+	cfg.Cloudflare.AccountID = "top-account"
+	cfg.Cloudflare.Scripts = []config.CloudflareScriptConf{
+		{Name: "api", Script: "my-api-worker"},
+		{Name: "cron", Script: "my-cron-worker", APIToken: "per-cron-token", AccountID: "per-cron-account"},
+	}
+
+	targets, err := cfg.ResolveCloudflareTargets("")
+	if err != nil {
+		t.Fatalf("エラーなしを期待: %v", err)
+	}
+	if len(targets) != 2 {
+		t.Fatalf("targets len = %d, want 2", len(targets))
+	}
+	// api: top-level フォールバック
+	if targets[0].APIToken != "top-token" || targets[0].AccountID != "top-account" {
+		t.Errorf("targets[0] = %+v, want top-level フォールバック", targets[0])
+	}
+	// cron: per-target が優先
+	if targets[1].APIToken != "per-cron-token" || targets[1].AccountID != "per-cron-account" {
+		t.Errorf("targets[1] = %+v, want per-target 優先", targets[1])
+	}
+}
+
+func TestResolveCloudflareTargets_SelectByName(t *testing.T) {
+	clearCloudflareEnv(t)
+	cfg := &config.AppConfig{}
+	cfg.Cloudflare.APIToken = "top-token"
+	cfg.Cloudflare.Scripts = []config.CloudflareScriptConf{
+		{Name: "api", Script: "my-api-worker"},
+		{Name: "cron", Script: "my-cron-worker"},
+	}
+
+	targets, err := cfg.ResolveCloudflareTargets("cron")
+	if err != nil {
+		t.Fatalf("エラーなしを期待: %v", err)
+	}
+	if len(targets) != 1 || targets[0].Script != "my-cron-worker" {
+		t.Errorf("targets = %+v, want [my-cron-worker]", targets)
+	}
+}
+
+func TestResolveCloudflareTargets_SelectByName_NotFound(t *testing.T) {
+	clearCloudflareEnv(t)
+	cfg := &config.AppConfig{}
+	cfg.Cloudflare.Scripts = []config.CloudflareScriptConf{{Name: "api", Script: "my-api-worker"}}
+
+	if _, err := cfg.ResolveCloudflareTargets("missing"); err == nil {
+		t.Fatal("存在しない名前の指定でエラーを期待したが nil")
+	}
+}
+
+func TestResolveCloudflareTargets_SelectWithoutScripts_IsError(t *testing.T) {
+	clearCloudflareEnv(t)
+	cfg := &config.AppConfig{}
+	if _, err := cfg.ResolveCloudflareTargets("api"); err == nil {
+		t.Fatal("scripts 未定義での名前指定はエラーを期待したが nil")
+	}
+}
+
+func TestResolveCloudflareTargets_ValidatesScriptConfs(t *testing.T) {
+	clearCloudflareEnv(t)
+	tests := []struct {
+		name    string
+		scripts []config.CloudflareScriptConf
+	}{
+		{"name 未設定", []config.CloudflareScriptConf{{Script: "w"}}},
+		{"name 重複", []config.CloudflareScriptConf{{Name: "a", Script: "w1"}, {Name: "a", Script: "w2"}}},
+		{"script 未設定", []config.CloudflareScriptConf{{Name: "a"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.AppConfig{}
+			cfg.Cloudflare.Scripts = tt.scripts
+			if _, err := cfg.ResolveCloudflareTargets(""); err == nil {
+				t.Errorf("%s でエラーを期待したが nil", tt.name)
+			}
+		})
+	}
+}
+
+func TestResolveCloudflareTargets_PassesEnvironmentsMapping(t *testing.T) {
+	// environments マッピングは各ターゲットへ引き継がれる
+	clearCloudflareEnv(t)
+	cfg := &config.AppConfig{}
+	cfg.Cloudflare.Script = "my-worker"
+	cfg.Cloudflare.Environments = map[string]string{"staging": "stg-worker"}
+
+	targets, err := cfg.ResolveCloudflareTargets("")
+	if err != nil {
+		t.Fatalf("エラーなしを期待: %v", err)
+	}
+	if targets[0].Environments["staging"] != "stg-worker" {
+		t.Errorf("Environments = %v, want staging→stg-worker", targets[0].Environments)
+	}
+}

@@ -151,6 +151,10 @@ func ParseFlags(argv []string, printUsageFn func(), versionFn func()) provider.O
 			opts.GitHubRepo = next()
 		case strings.HasPrefix(arg, "--github-repo="):
 			opts.GitHubRepo = strings.TrimPrefix(arg, "--github-repo=")
+		case arg == "--cloudflare-script" || arg == "-cloudflare-script":
+			opts.CloudflareScript = next()
+		case strings.HasPrefix(arg, "--cloudflare-script="):
+			opts.CloudflareScript = strings.TrimPrefix(arg, "--cloudflare-script=")
 		case arg == "--lang" || arg == "-lang" || arg == "--language" || arg == "-language":
 			opts.Language = next()
 		case strings.HasPrefix(arg, "--lang="):

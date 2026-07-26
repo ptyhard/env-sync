@@ -16,7 +16,10 @@ type Options struct {
 	Provider      string
 	VercelProject string // --vercel-project で指定した場合のターゲット名（モノレポ対応）
 	GitHubRepo    string // --github-repo で指定した場合のターゲット名（モノレポ対応）
-	Language      string // --lang で指定した表示言語コード（"en" / "ja"）
+	// CloudflareScript は --cloudflare-script で指定した場合のターゲット名（モノレポ対応）。
+	// 値は config の cloudflare.scripts[].name を指す（Worker スクリプト名そのものではない）。
+	CloudflareScript string
+	Language         string // --lang で指定した表示言語コード（"en" / "ja"）
 
 	// DefinedKeys は定義ファイル(variables)に宣言された全キー。
 	// prune の保持判定に使う（.env に値が無いキーも削除対象にはしない）。

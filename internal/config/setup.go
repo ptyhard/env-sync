@@ -30,6 +30,11 @@ type SetupAnswers struct {
 	GitHubRepo     string
 	GitHubTokenRef string // "${GITHUB_TOKEN}" または平文トークン
 
+	UseCloudflare       bool
+	CloudflareAccountID string
+	CloudflareScript    string // Worker スクリプト名（空なら wrangler 設定から解決）
+	CloudflareTokenRef  string // "${CLOUDFLARE_API_TOKEN}" または平文トークン
+
 	// 平文トークンが 1 つ以上含まれる場合 true（0600 パーミッション決定に使用）
 	HasPlainToken bool
 }
@@ -105,6 +110,23 @@ func BuildSetupYAML(answers SetupAnswers) string {
 		if answers.GitHubRepo != "" {
 			sb.WriteString("  repo: ")
 			sb.WriteString(yamlSingleQuote(answers.GitHubRepo))
+			sb.WriteString("\n")
+		}
+	}
+
+	if answers.UseCloudflare {
+		sb.WriteString("cloudflare:\n")
+		sb.WriteString("  api_token: ")
+		sb.WriteString(yamlSingleQuote(answers.CloudflareTokenRef))
+		sb.WriteString("\n")
+		if answers.CloudflareAccountID != "" {
+			sb.WriteString("  account_id: ")
+			sb.WriteString(yamlSingleQuote(answers.CloudflareAccountID))
+			sb.WriteString("\n")
+		}
+		if answers.CloudflareScript != "" {
+			sb.WriteString("  script: ")
+			sb.WriteString(yamlSingleQuote(answers.CloudflareScript))
 			sb.WriteString("\n")
 		}
 	}
@@ -270,6 +292,47 @@ func promptSetupAnswers(reader *bufio.Reader) (SetupAnswers, error) {
 				return answers, err
 			}
 			answers.GitHubTokenRef = token
+			answers.HasPlainToken = true
+		}
+	}
+
+	// Cloudflare Workers
+	fmt.Print(i18n.T(i18n.MsgSetupAskCloudflare))
+	useCloudflare, err := setupReadYesNo(reader, true)
+	if err != nil {
+		return answers, err
+	}
+	answers.UseCloudflare = useCloudflare
+
+	if useCloudflare {
+		fmt.Print(i18n.T(i18n.MsgSetupCloudflareAccountID))
+		accountID, err := setupReadLine(reader)
+		if err != nil {
+			return answers, err
+		}
+		answers.CloudflareAccountID = accountID
+
+		fmt.Print(i18n.T(i18n.MsgSetupCloudflareScript))
+		script, err := setupReadLine(reader)
+		if err != nil {
+			return answers, err
+		}
+		answers.CloudflareScript = script
+
+		fmt.Print(i18n.T(i18n.MsgSetupCloudflareTokenEnvRef))
+		useEnvRef, err := setupReadYesNo(reader, true)
+		if err != nil {
+			return answers, err
+		}
+		if useEnvRef {
+			answers.CloudflareTokenRef = "${CLOUDFLARE_API_TOKEN}"
+		} else {
+			fmt.Print(i18n.T(i18n.MsgSetupCloudflareTokenPlain))
+			token, err := setupReadLine(reader)
+			if err != nil {
+				return answers, err
+			}
+			answers.CloudflareTokenRef = token
 			answers.HasPlainToken = true
 		}
 	}
