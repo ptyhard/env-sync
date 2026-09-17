@@ -66,7 +66,7 @@ func notFoundErr() error {
 
 func TestBuildLabels_Empty(t *testing.T) {
 	// environments が空でも managed-by ラベルは常に付与される（prune の対象識別用）
-	labels := buildLabels(nil)
+	labels := buildLabels(nil, false)
 	if v, ok := labels["managed-by"]; !ok || v != "env-sync" {
 		t.Errorf(`labels["managed-by"] = %q, want "env-sync"`, v)
 	}
@@ -76,7 +76,7 @@ func TestBuildLabels_Empty(t *testing.T) {
 }
 
 func TestBuildLabels_Single(t *testing.T) {
-	labels := buildLabels([]string{"production"})
+	labels := buildLabels([]string{"production"}, false)
 	if v, ok := labels["environment"]; !ok || v != "production" {
 		t.Errorf(`labels["environment"] = %q, want "production"`, v)
 	}
@@ -86,7 +86,7 @@ func TestBuildLabels_Single(t *testing.T) {
 }
 
 func TestBuildLabels_Multiple(t *testing.T) {
-	labels := buildLabels([]string{"production", "staging"})
+	labels := buildLabels([]string{"production", "staging"}, false)
 	if v, ok := labels["environment"]; !ok || v != "production-staging" {
 		t.Errorf(`labels["environment"] = %q, want "production-staging"`, v)
 	}
@@ -113,7 +113,7 @@ func TestSyncSecret_NewSecret(t *testing.T) {
 	}
 
 	entry := provider.Entry{Key: "MY_SECRET", Value: "secret-value", Secret: true}
-	if err := syncSecret(context.Background(), mock, "my-project", entry); err != nil {
+	if err := syncSecret(context.Background(), mock, "my-project", entry, false); err != nil {
 		t.Fatalf("syncSecret: %v", err)
 	}
 	if createdSecretID != "MY_SECRET" {
@@ -143,7 +143,7 @@ func TestSyncSecret_ExistingSecret_WithEnvironments(t *testing.T) {
 	}
 
 	entry := provider.Entry{Key: "MY_SECRET", Value: "val", Secret: true, Environments: []string{"production"}}
-	if err := syncSecret(context.Background(), mock, "my-project", entry); err != nil {
+	if err := syncSecret(context.Background(), mock, "my-project", entry, false); err != nil {
 		t.Fatalf("syncSecret: %v", err)
 	}
 	if updatedLabels["environment"] != "production" {
@@ -172,7 +172,7 @@ func TestSyncSecret_ExistingSecret_NoEnvironments_AddsManagedLabel(t *testing.T)
 	}
 
 	entry := provider.Entry{Key: "MY_SECRET", Value: "val", Secret: true}
-	if err := syncSecret(context.Background(), mock, "my-project", entry); err != nil {
+	if err := syncSecret(context.Background(), mock, "my-project", entry, false); err != nil {
 		t.Fatalf("syncSecret: %v", err)
 	}
 	if updatedLabels["managed-by"] != "env-sync" {
@@ -201,7 +201,7 @@ func TestSyncSecret_ExistingSecret_LabelsUpToDate_SkipsUpdate(t *testing.T) {
 	}
 
 	entry := provider.Entry{Key: "MY_SECRET", Value: "val", Secret: true}
-	if err := syncSecret(context.Background(), mock, "my-project", entry); err != nil {
+	if err := syncSecret(context.Background(), mock, "my-project", entry, false); err != nil {
 		t.Fatalf("syncSecret: %v", err)
 	}
 	if updateCalled {
@@ -230,7 +230,7 @@ func TestSyncSecret_ExistingSecret_PreservesUnrelatedLabels(t *testing.T) {
 	}
 
 	entry := provider.Entry{Key: "MY_SECRET", Value: "val", Secret: true, Environments: []string{"production"}}
-	if err := syncSecret(context.Background(), mock, "my-project", entry); err != nil {
+	if err := syncSecret(context.Background(), mock, "my-project", entry, false); err != nil {
 		t.Fatalf("syncSecret: %v", err)
 	}
 	if updatedLabels["team"] != "custom" {
@@ -247,7 +247,7 @@ func TestSyncSecret_GetSecretError(t *testing.T) {
 			return nil, fmt.Errorf("permission denied")
 		},
 	}
-	err := syncSecret(context.Background(), mock, "my-project", provider.Entry{Key: "KEY", Value: "val", Secret: true})
+	err := syncSecret(context.Background(), mock, "my-project", provider.Entry{Key: "KEY", Value: "val", Secret: true}, false)
 	if err == nil {
 		t.Error("エラーが返るべき")
 	}
@@ -262,7 +262,7 @@ func TestSyncSecret_AddVersionError(t *testing.T) {
 			return nil, fmt.Errorf("add version failed")
 		},
 	}
-	err := syncSecret(context.Background(), mock, "my-project", provider.Entry{Key: "KEY", Value: "val", Secret: true})
+	err := syncSecret(context.Background(), mock, "my-project", provider.Entry{Key: "KEY", Value: "val", Secret: true}, false)
 	if err == nil {
 		t.Error("エラーが返るべき")
 	}
@@ -369,5 +369,90 @@ func TestGCPProvider_Registered(t *testing.T) {
 	}
 	if p.Name() != "gcp" {
 		t.Errorf("Name() = %q, want gcp", p.Name())
+	}
+}
+
+// TestFirebaseProvider_Registered は registry 経由で firebase provider を引けることを確認する。
+// 直接 gcpProvider{firebase: true} を作るテストでは、登録名や factory が壊れても気付けず
+// 実際の --provider firebase が起動時に拒否されるため、registry 経由でも確認する。
+func TestFirebaseProvider_Registered(t *testing.T) {
+	p, ok := provider.LookupProvider("firebase")
+	if !ok {
+		t.Fatal("firebase provider が registry に登録されていない")
+	}
+	if p.Name() != "firebase" {
+		t.Errorf("Name() = %q, want firebase", p.Name())
+	}
+}
+
+// --- firebase プロバイダのテスト ---
+
+func TestFirebaseProvider_Name(t *testing.T) {
+	if got := (&gcpProvider{firebase: true}).Name(); got != "firebase" {
+		t.Errorf("Name() = %q, want %q", got, "firebase")
+	}
+	if got := (&gcpProvider{}).Name(); got != "gcp" {
+		t.Errorf("Name() = %q, want %q", got, "gcp")
+	}
+}
+
+func TestBuildLabels_Firebase(t *testing.T) {
+	// firebase functions:secrets:set と同じラベルを付ける（firebase CLI の管理判定に使われる）
+	labels := buildLabels([]string{"production"}, true)
+	if v := labels["firebase-managed"]; v != "functions" {
+		t.Errorf(`labels["firebase-managed"] = %q, want "functions"`, v)
+	}
+	if v := labels["managed-by"]; v != "env-sync" {
+		t.Errorf(`labels["managed-by"] = %q, want "env-sync"`, v)
+	}
+	// gcp では付けない（Firebase と無関係な Secret に誤ったメタデータを残さない）
+	if _, ok := buildLabels([]string{"production"}, false)["firebase-managed"]; ok {
+		t.Error("gcp provider で firebase-managed ラベルが付いている")
+	}
+}
+
+func TestSyncSecret_FirebaseLabelOnCreate(t *testing.T) {
+	var created *secretmanagerpb.Secret
+	mock := &mockClient{
+		getSecret: func(context.Context, *secretmanagerpb.GetSecretRequest) (*secretmanagerpb.Secret, error) {
+			return nil, notFoundErr()
+		},
+		createSecret: func(_ context.Context, req *secretmanagerpb.CreateSecretRequest) (*secretmanagerpb.Secret, error) {
+			created = req.Secret
+			return req.Secret, nil
+		},
+		addSecretVersion: func(context.Context, *secretmanagerpb.AddSecretVersionRequest) (*secretmanagerpb.SecretVersion, error) {
+			return &secretmanagerpb.SecretVersion{}, nil
+		},
+	}
+	entry := provider.Entry{Key: "API_KEY", Value: "val", Secret: true}
+	if err := syncSecret(context.Background(), mock, "my-project", entry, true); err != nil {
+		t.Fatalf("syncSecret: %v", err)
+	}
+	if created.GetLabels()["firebase-managed"] != "functions" {
+		t.Errorf("作成した Secret の labels = %v, firebase-managed=functions が必要", created.GetLabels())
+	}
+}
+
+func TestFirebaseProvider_ProjectID(t *testing.T) {
+	g := &gcpProvider{firebase: true}
+	t.Setenv("GCP_PROJECT_ID", "")
+	t.Setenv("FIREBASE_PROJECT_ID", "")
+	if _, err := g.projectID(); err == nil {
+		t.Error("どちらも未設定ならエラーが返るべき")
+	}
+	// GCP_PROJECT_ID へのフォールバック
+	t.Setenv("GCP_PROJECT_ID", "from-gcp")
+	if got, _ := g.projectID(); got != "from-gcp" {
+		t.Errorf("projectID() = %q, want %q", got, "from-gcp")
+	}
+	// FIREBASE_PROJECT_ID が優先
+	t.Setenv("FIREBASE_PROJECT_ID", "from-firebase")
+	if got, _ := g.projectID(); got != "from-firebase" {
+		t.Errorf("projectID() = %q, want %q", got, "from-firebase")
+	}
+	// gcp provider は FIREBASE_PROJECT_ID を見ない
+	if got, _ := (&gcpProvider{}).projectID(); got != "from-gcp" {
+		t.Errorf("gcp provider の projectID() = %q, want %q", got, "from-gcp")
 	}
 }

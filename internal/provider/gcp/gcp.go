@@ -22,6 +22,11 @@ import (
 
 func init() {
 	provider.RegisterProvider("gcp", func() provider.Provider { return &gcpProvider{} })
+	// firebase は「firebase-managed ラベルを足した gcp」でしかない。Firebase Functions 2nd gen の
+	// defineSecret() が読むのは同じ GCP プロジェクトの Secret Manager 上の Secret そのもので、
+	// firebase functions:secrets:set もこの Secret を作ってラベルを付けているだけ。
+	// ラベルを合わせておくと firebase CLI 側からも Functions 管理の Secret として扱われる。
+	provider.RegisterProvider("firebase", func() provider.Provider { return &gcpProvider{firebase: true} })
 }
 
 // secretManagerClient は Secret Manager API 操作を抽象化するインターフェース。
@@ -89,16 +94,45 @@ var newClientFunc = func(ctx context.Context) (secretManagerClient, error) {
 }
 
 // gcpProvider は GCP Secret Manager への同期を担当する Provider 実装。
-type gcpProvider struct{}
+// firebase が true のときは "firebase" プロバイダとして振る舞い、Secret に
+// firebase-managed ラベルを付与し、プロジェクト ID を FIREBASE_PROJECT_ID からも解決する。
+type gcpProvider struct {
+	firebase bool
+}
 
-func (g *gcpProvider) Name() string { return "gcp" }
+func (g *gcpProvider) Name() string {
+	if g.firebase {
+		return "firebase"
+	}
+	return "gcp"
+}
+
+// projectID は同期先プロジェクト ID を環境変数から解決する。
+// Firebase プロジェクトは GCP プロジェクトそのものなので、firebase モードでは
+// FIREBASE_PROJECT_ID を優先しつつ GCP_PROJECT_ID にもフォールバックする。
+func (g *gcpProvider) projectID() (string, error) {
+	if g.firebase {
+		if v := os.Getenv("FIREBASE_PROJECT_ID"); v != "" {
+			return v, nil
+		}
+		if v := os.Getenv("GCP_PROJECT_ID"); v != "" {
+			return v, nil
+		}
+		return "", fmt.Errorf("%s", i18n.T(i18n.MsgFirebaseProjectIDMissing))
+	}
+	v := os.Getenv("GCP_PROJECT_ID")
+	if v == "" {
+		return "", fmt.Errorf("%s", i18n.T(i18n.MsgGCPProjectIDMissing))
+	}
+	return v, nil
+}
 
 // Sync は GCP Secret Manager への環境変数同期を行う。
 // Entry.Secret == false のエントリはスキップする（Secret Manager は秘匿値専用）。
 func (g *gcpProvider) Sync(opts provider.Options, entries []provider.Entry) error {
-	projectID := os.Getenv("GCP_PROJECT_ID")
-	if projectID == "" {
-		return fmt.Errorf("%s", i18n.T(i18n.MsgGCPProjectIDMissing))
+	projectID, err := g.projectID()
+	if err != nil {
+		return err
 	}
 
 	var secretEntries []provider.Entry
@@ -199,7 +233,7 @@ func (g *gcpProvider) Sync(opts provider.Options, entries []provider.Entry) erro
 
 	ok, ng := 0, 0
 	for _, e := range secretEntries {
-		if err := syncSecret(ctx, client, projectID, e); err != nil {
+		if err := syncSecret(ctx, client, projectID, e, g.firebase); err != nil {
 			fmt.Printf("✗ %s -> %s\n", e.Key, err)
 			ng++
 		} else {
@@ -247,11 +281,11 @@ func computeGCPPrune(secrets []*secretmanagerpb.Secret, keep func(key string) bo
 // secret が存在しなければ作成し、存在すれば labels を更新する。その後バージョンを追加する。
 // GetSecret → CreateSecret の間に別プロセスが同名 secret を作成した場合（AlreadyExists）は
 // 競合を無視してバージョン追加へ進む（再実行・並行実行に強い挙動）。
-func syncSecret(ctx context.Context, client secretManagerClient, projectID string, e provider.Entry) error {
+func syncSecret(ctx context.Context, client secretManagerClient, projectID string, e provider.Entry, firebase bool) error {
 	secretName := fmt.Sprintf("projects/%s/secrets/%s", projectID, e.Key)
 	parent := fmt.Sprintf("projects/%s", projectID)
 
-	labels := buildLabels(e.Environments)
+	labels := buildLabels(e.Environments, firebase)
 
 	existing, err := client.GetSecret(ctx, &secretmanagerpb.GetSecretRequest{Name: secretName})
 	if err != nil {
@@ -312,12 +346,24 @@ const (
 	managedByLabelValue = "env-sync"
 )
 
+// firebaseManagedLabelKey / firebaseManagedLabelValue は firebase functions:secrets:set が
+// 付けるのと同じラベル。firebase CLI はこのラベルで Functions 管理の Secret を判定するため、
+// 値も CLI 現行版に合わせる（旧版は "true" を書いていたが CLI はどちらも受け付ける）。
+const (
+	firebaseManagedLabelKey   = "firebase-managed"
+	firebaseManagedLabelValue = "functions"
+)
+
 // buildLabels は Entry.Environments から Secret Manager labels を組み立てる。
 // managed-by=env-sync を常に付与し、複数 environment は "-" で連結して "environment" キーに格納する。
-func buildLabels(environments []string) map[string]string {
+// firebase が true のときは firebase-managed=functions も付与する。
+func buildLabels(environments []string, firebase bool) map[string]string {
 	labels := map[string]string{managedByLabelKey: managedByLabelValue}
 	if len(environments) > 0 {
 		labels["environment"] = strings.Join(environments, "-")
+	}
+	if firebase {
+		labels[firebaseManagedLabelKey] = firebaseManagedLabelValue
 	}
 	return labels
 }

@@ -20,7 +20,7 @@ var jaCatalog = map[MsgKey]string{
 	MsgSkipNoValueInEnv:          "⚠ %s: 定義にあるが %s に値が無いためスキップ\n",
 	MsgSkipNotDefined:            "⚠ %s: %s にあるが定義に無いためスキップ\n",
 	MsgSkipNoMatchingEnvironment: "⚠ %s: --environments フィルタ後に一致する環境が無いためスキップ\n",
-	MsgUsage: `env-sync - 定義ファイルで宣言した環境変数を Vercel / GitHub Actions / GCP / Cloudflare Workers へ一括登録(同期)する
+	MsgUsage: `env-sync - 定義ファイルで宣言した環境変数を Vercel / GitHub Actions / GCP / Firebase Functions / Cloudflare Workers へ一括登録(同期)する
 
 サブコマンド:
   init      .env から env-sync.yaml の雛形を生成する
@@ -30,6 +30,8 @@ var jaCatalog = map[MsgKey]string{
 使い方:
   VERCEL_TOKEN=xxxxx env-sync [オプション]
   GITHUB_TOKEN=xxxxx env-sync --provider github [オプション]
+  GCP_PROJECT_ID=xxxxx env-sync --provider gcp [オプション]
+  FIREBASE_PROJECT_ID=xxxxx env-sync --provider firebase [オプション]
   CLOUDFLARE_API_TOKEN=xxxxx env-sync --provider cloudflare [オプション]
   env-sync init [--env <file>] [--def <file>] [--force]
   env-sync setup [--global] [--force]
@@ -80,6 +82,16 @@ var jaCatalog = map[MsgKey]string{
   認証: Application Default Credentials（ADC）を使用。
         GOOGLE_APPLICATION_CREDENTIALS でサービスアカウント鍵を指定、
         または gcloud auth application-default login で ADC を設定する。
+
+環境変数（Firebase Functions）:
+  FIREBASE_PROJECT_ID  対象 Firebase プロジェクト ID。未設定なら GCP_PROJECT_ID にフォールバック
+  認証: gcp と同じ Application Default Credentials（ADC）を使用。
+  ※ 同じプロジェクトの Secret Manager に、firebase functions:secrets:set が付けるのと同じ
+     firebase-managed ラベルを付けて書き込みます。関数側は defineSecret("KEY") で参照します。
+  ※ シークレットのみ同期します。平文 env（secret: false）はスキップします。
+     2nd gen の平文 env は functions/.env をデプロイ時に Firebase CLI が読む方式で、
+     API から書き込める置き場所がないためです。
+  ※ ランタイムサービスアカウントへの secretmanager.secretAccessor 付与は firebase deploy の責務です。
 
 環境変数（Cloudflare Workers）:
   CLOUDFLARE_API_TOKEN   Workers Scripts:Edit 権限を持つ API トークン（必須、dry-run 時は不要）
@@ -331,6 +343,7 @@ YAML スキーマ（定義ファイル env-sync.yaml）:
 
 	// ----- GCP Provider -----
 	MsgGCPProjectIDMissing:      "GCP_PROJECT_ID が未設定です",
+	MsgFirebaseProjectIDMissing: "FIREBASE_PROJECT_ID / GCP_PROJECT_ID がどちらも未設定です",
 	MsgGCPSkipNotSecret:         "⚠ %s: secret=false のためスキップ（Secret Manager は秘匿値専用）\n",
 	MsgGCPTargetProject:         "対象プロジェクト: %s\n",
 	MsgGCPLabelsNone:            "(labels なし)",

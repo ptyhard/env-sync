@@ -310,6 +310,8 @@ const (
 
 	// MsgGCPProjectIDMissing は GCP_PROJECT_ID 未設定エラー。
 	MsgGCPProjectIDMissing MsgKey = "gcp.project_id_missing"
+	// MsgFirebaseProjectIDMissing は firebase provider でプロジェクト ID 未設定エラー。
+	MsgFirebaseProjectIDMissing MsgKey = "gcp.firebase_project_id_missing"
 	// MsgGCPSkipNotSecret は secret=false エントリのスキップ警告（書式: キー名）。
 	MsgGCPSkipNotSecret MsgKey = "gcp.skip_not_secret"
 	// MsgGCPTargetProject は GCP 同期先プロジェクト表示（書式: プロジェクト ID）。

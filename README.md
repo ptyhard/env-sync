@@ -2,12 +2,13 @@
 
 English | [日本語](README.ja.md)
 
-A Go CLI that bulk-registers (syncs) environment variables declared in an `env-sync.yaml` definition file to **Vercel**, **GitHub Actions**, **GCP Secret Manager** and/or **Cloudflare Workers**.
+A Go CLI that bulk-registers (syncs) environment variables declared in an `env-sync.yaml` definition file to **Vercel**, **GitHub Actions**, **GCP Secret Manager**, **Firebase Functions** and/or **Cloudflare Workers**.
 From a single definition file you can choose the sync target per variable and push to several providers at once.
 
 - **Vercel**: Uses the REST API (`POST /v10/projects/{id}/env?upsert=true`), so re-running **upserts** existing variables.
 - **GitHub Actions**: Supports both Secrets (sealed-box encrypted) and Variables (plaintext).
 - **GCP Secret Manager**: Adds a new Secret version per run. Only `secret: true` entries are synced.
+- **Firebase Functions**: Registers the secrets read by 2nd gen `defineSecret()` (backed by GCP Secret Manager — see [Sync to Firebase Functions](#6-sync-to-firebase-functions)).
 - **Cloudflare Workers**: Registers Worker Secrets via the REST API. Only `secret: true` entries are synced (see [Sync to Cloudflare Workers](#5-sync-to-cloudflare-workers)).
 
 ## How It Works
@@ -299,9 +300,47 @@ env-sync --provider cloudflare --env .env.production --cloudflare-script cron
 env-sync validate --provider cloudflare
 ```
 
-## 6. Mixing Providers
+## 6. Sync to Firebase Functions
 
-By specifying `provider` per variable, you can sync to both Vercel and GitHub Actions simultaneously from a single `env-sync.yaml`.
+Secrets for Cloud Functions for Firebase (2nd gen) *are* Secret Manager secrets in the same GCP project. `firebase functions:secrets:set KEY` just creates that secret and tags it with a `firebase-managed` label, so `--provider firebase` does the same thing in bulk, straight from your `.env`.
+
+```bash
+export FIREBASE_PROJECT_ID=my-firebase-project   # falls back to GCP_PROJECT_ID when unset
+gcloud auth application-default login            # same ADC auth as the gcp provider
+
+env-sync --provider firebase --dry-run
+env-sync --provider firebase
+```
+
+Your functions read them with `defineSecret()` as usual:
+
+```ts
+import { defineSecret } from "firebase-functions/params";
+import { onRequest } from "firebase-functions/v2/https";
+
+const apiSecret = defineSecret("API_SECRET");
+
+export const api = onRequest({ secrets: [apiSecret] }, (req, res) => {
+  res.send(apiSecret.value());
+});
+```
+
+### Differences from `gcp`
+
+`firebase` is `gcp` plus exactly two things:
+
+- It labels secrets `firebase-managed=functions` — the same label `firebase functions:secrets:set` applies. Without it, `firebase functions:secrets:*` treats the secret as unmanaged and prompts on every operation.
+- It resolves the project id from `FIREBASE_PROJECT_ID`, then `GCP_PROJECT_ID`.
+
+### Caveats
+
+- **Only `secret: true` entries are synced.** Plaintext 2nd gen env vars come from `functions/.env` files that the Firebase CLI reads at deploy time; there is no API to write them. `secret: false` variables are skipped with a warning.
+- **Granting `secretmanager.secretAccessor` to the runtime service account is `firebase deploy`'s job.** env-sync never touches IAM. Run `firebase deploy --only functions` once after syncing.
+- **Old versions are not destroyed.** env-sync adds a new secret version per run. Use `firebase functions:secrets:prune` to clean up unused versions.
+
+## 7. Mixing Providers
+
+By specifying `provider` per variable, you can sync to several providers simultaneously from a single `env-sync.yaml` (Vercel and GitHub Actions below, but any registered provider works).
 
 ```yaml
 defaults:
@@ -333,9 +372,9 @@ VERCEL_TOKEN=xxxxx GITHUB_TOKEN=yyyyy env-sync --env .env.production
 
 Resolution priority (highest first): **per-variable `provider`** → **`defaults.provider`** → **CLI `--provider` flag** (default `vercel`)
 
-Invalid values (anything other than `vercel` / `github`) cause an error. During `--dry-run`, the `providers` column shows the routing for each variable.
+Values outside the registered provider set (`vercel` / `github` / `gcp` / `firebase` / `cloudflare`) cause an error. During `--dry-run`, the `providers` column shows the routing for each variable.
 
-## 7. Managing Auth Credentials and IDs via Config File
+## 8. Managing Auth Credentials and IDs via Config File
 
 Instead of environment variables, you can manage tokens and IDs in a YAML file, eliminating the need to pass `VERCEL_TOKEN=...` every time.
 
@@ -601,14 +640,15 @@ Safety behavior:
 - Keys matching `prune_exclude` glob patterns are kept (case-insensitive).
 - **Vercel**: system variables and integration-provisioned variables (those with a `configurationId`, e.g. created by Blob Store or Marketplace integrations) are automatically excluded.
 - **GitHub**: Actions Secrets and Variables are pruned at the repository level and in named environments that appear in the definition file.
-- **GCP**: only Secrets labeled `managed-by=env-sync` are pruned. env-sync adds this label automatically when syncing, so Secrets created by anything else are never touched.
+- **GCP / Firebase**: only Secrets labeled `managed-by=env-sync` are pruned. env-sync adds this label automatically when syncing, so Secrets created by anything else (including `firebase functions:secrets:set`) are never touched.
+  - `gcp` and `firebase` read the same label in the same project, so they **share one prune scope**. Running both from a single definition file is fine — the set of defined keys used to decide what to keep is shared too. Syncing the same GCP project from **separate definition files** with `--prune` lets one of them consider the other's Secrets for deletion (this is equally true of `gcp` on its own).
 - **Cloudflare**: Worker Secrets are pruned only on the scripts that the definition file targets. Secrets on Workers that never appear in the run are untouched.
 
 ## Options / Environment Variables
 
 | Item | Required | Description |
 |------|----------|-------------|
-| `--provider <name>` | – | Sync target (default `vercel`). Currently `vercel` / `github` / `gcp` / `cloudflare` are available |
+| `--provider <name>` | – | Sync target (default `vercel`). Currently `vercel` / `github` / `gcp` / `firebase` / `cloudflare` are available |
 | `--vercel-project <name>` | – | Filter sync to a single `vercel.projects[].name` from config. All defined projects if unspecified |
 | `--github-repo <name>` | – | Filter sync to a single `github.repos[].name` from config. All defined repos if unspecified |
 | `--cloudflare-script <name>` | – | Filter sync to a single `cloudflare.scripts[].name` from config. All defined Workers if unspecified |
@@ -624,6 +664,8 @@ Safety behavior:
 | `VERCEL_TEAM_ID` | – (Vercel) | Team (org) ID. Falls back to config file or `.vercel/project.json` `orgId` |
 | `GITHUB_TOKEN` | Yes (GitHub) | GitHub access token (not required for dry-run) |
 | `GITHUB_REPO` | – (GitHub) | `owner/repo` format. Auto-detected from config file or `git remote origin` if unset |
+| `GCP_PROJECT_ID` | Yes (GCP) | Target GCP project id for Secret Manager. Auth uses ADC |
+| `FIREBASE_PROJECT_ID` | Yes (Firebase) | Target Firebase project id. Falls back to `GCP_PROJECT_ID` when unset |
 | `CLOUDFLARE_API_TOKEN` | Yes (Cloudflare) | API token with the Workers Scripts:Edit permission (not required for dry-run) |
 | `CLOUDFLARE_ACCOUNT_ID` | Yes (Cloudflare) | Target account ID. Falls back to `cloudflare.account_id` in the config file. Not required for dry-run, but without it the new/update classification is skipped |
 | `CLOUDFLARE_SCRIPT_NAME` | – (Cloudflare) | Worker script name. Falls back to the config file or the `name` field of the wrangler config |

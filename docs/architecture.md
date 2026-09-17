@@ -2,7 +2,7 @@
 
 > 最終更新: 2026-07-26
 
-`env-sync` は、定義ファイル `env-sync.yaml` で宣言した環境変数を **Vercel** / **GitHub Actions** / **GCP Secret Manager** / **Cloudflare Workers** へ一括同期する Go 製の単一バイナリ CLI。値は定義ファイルには書かず `.env(.production)` から読み込む。
+`env-sync` は、定義ファイル `env-sync.yaml` で宣言した環境変数を **Vercel** / **GitHub Actions** / **GCP Secret Manager** / **Firebase Functions** / **Cloudflare Workers** へ一括同期する Go 製の単一バイナリ CLI。値は定義ファイルには書かず `.env(.production)` から読み込む。
 
 ## 技術スタック
 
@@ -51,7 +51,7 @@
 │       │   ├── github_test.go
 │       │   └── github_integration_test.go
 │       ├── gcp/
-│       │   ├── gcp.go     # gcpProvider + init()（Secret Manager クライアントを抽象化）
+│       │   ├── gcp.go     # gcpProvider + init()（"gcp" / "firebase" の 2 名で自己登録）
 │       │   └── gcp_test.go
 │       └── cloudflare/
 │           ├── cloudflare.go           # cloudflareProvider + init()（var apiBase はここに定義）
@@ -146,6 +146,7 @@ provider 側での翻訳:
 
 - **Vercel**（`entriesToVercelItems`, `internal/provider/vercel/vercel.go`）: `Secret` → `type`（true=`sensitive` / false=`plain`）、`Environments` → `target`（空なら `[production, preview]`）。`production|preview|development` のみ許可。
 - **GitHub**（`expandGitHubTasks`, `internal/provider/github/github.go`）: `Secret` → Secret(sealed box 暗号化) / Variable(平文) の振り分け、`Environments` → named environment スコープ（空なら repo レベル。各環境ごとに task を展開）。
+- **Firebase**（`gcpProvider{firebase: true}`, `internal/provider/gcp/gcp.go`）: `gcp` と同じ Secret Manager への同期に `firebase-managed=functions` ラベル（`firebase functions:secrets:set` が付けるのと同じもの）を追加し、プロジェクト ID を `FIREBASE_PROJECT_ID` → `GCP_PROJECT_ID` の順で解決する。IAM（ランタイム SA への accessor 付与）は `firebase deploy` の責務なので触らない。
 - **Cloudflare**（`expandCloudflareTasks`, `internal/provider/cloudflare/cloudflare.go`）: `Secret` == false は警告のうえスキップ（平文 vars は wrangler 設定の `[vars]` が所有し、次の `wrangler deploy` で上書きされるため）。`Environments` → Worker スクリプト名（`resolveScriptName` が `<script>-<env>` へ解決。認証 config の `cloudflare.environments` で上書き可）。1 つの Entry が複数環境を宣言していれば環境ごとに task を展開し、同一スクリプトに解決された場合は重複排除する。
 
 ## 設定ファイル（env-sync.yaml）の構造
