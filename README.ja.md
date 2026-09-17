@@ -339,7 +339,7 @@ export const api = onRequest({ secrets: [apiSecret] }, (req, res) => {
 
 ## 7. 複数プロバイダーを混在させる
 
-変数ごとに `provider` を指定すると、1 つの `env-sync.yaml` から Vercel と GitHub Actions の両方へ同時に同期できます。
+変数ごとに `provider` を指定すると、1 つの `env-sync.yaml` から複数のプロバイダーへ同時に同期できます（以下は Vercel と GitHub Actions の例ですが、登録済みのどのプロバイダーでも同じです）。
 
 ```yaml
 defaults:
@@ -371,7 +371,7 @@ VERCEL_TOKEN=xxxxx GITHUB_TOKEN=yyyyy env-sync --env .env.production
 
 解決優先順位（高い順）: **変数個別の `provider`** → **`defaults.provider`** → **CLI `--provider` フラグ**（デフォルト `vercel`）
 
-不正な値（`vercel` / `github` 以外）を指定するとエラーで中止します。`--dry-run` では各変数の `providers` 列で振り分け先を確認できます。
+登録済みプロバイダー（`vercel` / `github` / `gcp` / `firebase` / `cloudflare`）以外の値を指定するとエラーで中止します。`--dry-run` では各変数の `providers` 列で振り分け先を確認できます。
 
 ## 8. config ファイルで認証情報・ID を管理する
 
@@ -640,6 +640,7 @@ variables:
 - **Vercel**: システム変数と、インテグレーションが作成した変数（Blob Store・Marketplace 連携などで `configurationId` を持つもの）は自動で除外されます。
 - **GitHub**: Actions Secrets / Variables を、repo レベルと定義ファイルに現れる named environment のスコープで削除します。
 - **GCP / Firebase**: `managed-by=env-sync` ラベル付き Secret のみ削除対象です。このラベルは env-sync が同期時に自動付与するため、env-sync 以外が作成した Secret（`firebase functions:secrets:set` で作ったものを含む）には触れません。
+  - `gcp` と `firebase` は同じプロジェクトの同じラベルを見るため、**prune スコープを共有します**。1 つの定義ファイルで両方を運用する分には、保持判定に使う「定義済みキー」も共通なので問題ありません。同じ GCP プロジェクトを**別々の定義ファイル**から `--prune` 付きで同期すると、片方がもう片方の Secret を削除対象に含めます（これは gcp 単体でも同じです）。
 - **Cloudflare**: 定義ファイルが対象とするスクリプトの Worker Secrets のみ削除対象です。その実行に現れない Worker のシークレットには触れません。
 
 ## オプション / 環境変数

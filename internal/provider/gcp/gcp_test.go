@@ -372,6 +372,19 @@ func TestGCPProvider_Registered(t *testing.T) {
 	}
 }
 
+// TestFirebaseProvider_Registered は registry 経由で firebase provider を引けることを確認する。
+// 直接 gcpProvider{firebase: true} を作るテストでは、登録名や factory が壊れても気付けず
+// 実際の --provider firebase が起動時に拒否されるため、registry 経由でも確認する。
+func TestFirebaseProvider_Registered(t *testing.T) {
+	p, ok := provider.LookupProvider("firebase")
+	if !ok {
+		t.Fatal("firebase provider が registry に登録されていない")
+	}
+	if p.Name() != "firebase" {
+		t.Errorf("Name() = %q, want firebase", p.Name())
+	}
+}
+
 // --- firebase プロバイダのテスト ---
 
 func TestFirebaseProvider_Name(t *testing.T) {

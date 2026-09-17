@@ -20,7 +20,7 @@ var enCatalog = map[MsgKey]string{
 	MsgSkipNoValueInEnv:          "⚠ %s: defined but no value in %s, skipping\n",
 	MsgSkipNotDefined:            "⚠ %s: in %s but not defined, skipping\n",
 	MsgSkipNoMatchingEnvironment: "⚠ %s: no matching environments after --environments filter, skipping\n",
-	MsgUsage: `env-sync - sync environment variables declared in a definition file to Vercel, GitHub Actions, GCP or Cloudflare Workers
+	MsgUsage: `env-sync - sync environment variables declared in a definition file to Vercel, GitHub Actions, GCP, Firebase Functions or Cloudflare Workers
 
 Subcommands:
   init      generate env-sync.yaml template from .env
@@ -30,6 +30,8 @@ Subcommands:
 Usage:
   VERCEL_TOKEN=xxxxx env-sync [options]
   GITHUB_TOKEN=xxxxx env-sync --provider github [options]
+  GCP_PROJECT_ID=xxxxx env-sync --provider gcp [options]
+  FIREBASE_PROJECT_ID=xxxxx env-sync --provider firebase [options]
   CLOUDFLARE_API_TOKEN=xxxxx env-sync --provider cloudflare [options]
   env-sync init [--env <file>] [--def <file>] [--force]
   env-sync setup [--global] [--force]
@@ -80,6 +82,15 @@ Environment variables (GCP):
   Auth: uses Application Default Credentials (ADC).
         Set GOOGLE_APPLICATION_CREDENTIALS for a service account key,
         or run gcloud auth application-default login to configure ADC.
+
+Environment variables (Firebase Functions):
+  FIREBASE_PROJECT_ID  target Firebase project ID; falls back to GCP_PROJECT_ID when unset
+  Auth: same Application Default Credentials (ADC) as the gcp provider.
+  * Secrets are written to the project's Secret Manager with the same firebase-managed label
+    that firebase functions:secrets:set applies. Read them with defineSecret("KEY").
+  * Only secrets are synced. Plain text env vars (secret: false) are skipped because 2nd gen
+    reads those from functions/.env at deploy time and no API can write them.
+  * Granting secretmanager.secretAccessor to the runtime service account is firebase deploy's job.
 
 Environment variables (Cloudflare Workers):
   CLOUDFLARE_API_TOKEN   Cloudflare API token with the Workers Scripts:Edit permission (required, not needed for dry-run)

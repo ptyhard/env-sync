@@ -340,7 +340,7 @@ export const api = onRequest({ secrets: [apiSecret] }, (req, res) => {
 
 ## 7. Mixing Providers
 
-By specifying `provider` per variable, you can sync to both Vercel and GitHub Actions simultaneously from a single `env-sync.yaml`.
+By specifying `provider` per variable, you can sync to several providers simultaneously from a single `env-sync.yaml` (Vercel and GitHub Actions below, but any registered provider works).
 
 ```yaml
 defaults:
@@ -372,7 +372,7 @@ VERCEL_TOKEN=xxxxx GITHUB_TOKEN=yyyyy env-sync --env .env.production
 
 Resolution priority (highest first): **per-variable `provider`** → **`defaults.provider`** → **CLI `--provider` flag** (default `vercel`)
 
-Invalid values (anything other than `vercel` / `github`) cause an error. During `--dry-run`, the `providers` column shows the routing for each variable.
+Values outside the registered provider set (`vercel` / `github` / `gcp` / `firebase` / `cloudflare`) cause an error. During `--dry-run`, the `providers` column shows the routing for each variable.
 
 ## 8. Managing Auth Credentials and IDs via Config File
 
@@ -641,6 +641,7 @@ Safety behavior:
 - **Vercel**: system variables and integration-provisioned variables (those with a `configurationId`, e.g. created by Blob Store or Marketplace integrations) are automatically excluded.
 - **GitHub**: Actions Secrets and Variables are pruned at the repository level and in named environments that appear in the definition file.
 - **GCP / Firebase**: only Secrets labeled `managed-by=env-sync` are pruned. env-sync adds this label automatically when syncing, so Secrets created by anything else (including `firebase functions:secrets:set`) are never touched.
+  - `gcp` and `firebase` read the same label in the same project, so they **share one prune scope**. Running both from a single definition file is fine — the set of defined keys used to decide what to keep is shared too. Syncing the same GCP project from **separate definition files** with `--prune` lets one of them consider the other's Secrets for deletion (this is equally true of `gcp` on its own).
 - **Cloudflare**: Worker Secrets are pruned only on the scripts that the definition file targets. Secrets on Workers that never appear in the run are untouched.
 
 ## Options / Environment Variables
