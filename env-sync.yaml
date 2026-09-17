@@ -1,4 +1,4 @@
-# Vercel / GitHub Actions / GCP Secret Manager / Cloudflare Workers に登録する環境変数の定義。
+# Vercel / GitHub Actions / GCP Secret Manager / Firebase Functions / Cloudflare Workers に登録する環境変数の定義。
 #
 # 値はこのファイルには書かない（git にコミットされるため）。値は .env(.production) から取得する。
 # ここに宣言が無いキーは登録されない（.env にあっても警告のうえスキップされる）。
@@ -52,11 +52,14 @@
 #           指定できる名前は production|preview|development + この定義に現れる環境名のみ
 #           （それ以外はエラー。大文字小文字を区別する）。
 #
-#   provider: vercel|github|gcp|cloudflare|[vercel, gcp]|[vercel, github]
+#   provider: vercel|github|gcp|firebase|cloudflare|[vercel, gcp]|[vercel, github]
 #           同期先プロバイダーを変数ごとに指定する。
 #           - provider: vercel             Vercel にのみ送る
 #           - provider: github             GitHub Actions にのみ送る
 #           - provider: gcp               GCP Secret Manager にのみ送る
+#           - provider: firebase           Firebase Functions のシークレットに送る
+#                                          （gcp と同じ Secret Manager に、firebase CLI と同じ
+#                                            firebase-managed ラベルを付けて書く）
 #           - provider: cloudflare         Cloudflare Workers にのみ送る
 #           - provider: [vercel, gcp]      Vercel と GCP 両方に送る
 #           - provider: [vercel, github]   Vercel と GitHub 両方に送る
@@ -78,6 +81,14 @@
 #           secret: true のエントリのみ同期（false はスキップ）
 #           environments に値を設定すると、Secret に labels {"environment": "<env>"} が付与される
 #           ※ environments が複数の場合は "-" で連結（例: [production, staging] → "production-staging"）
+#
+#   ---- Firebase Functions（2nd gen のシークレット） ----
+#           必須環境変数: FIREBASE_PROJECT_ID（無ければ GCP_PROJECT_ID にフォールバック）
+#           認証: gcp と同じ Application Default Credentials
+#           実体は gcp と同じ Secret Manager への同期で、firebase functions:secrets:set が付ける
+#           firebase-managed=functions ラベルを足すだけ。関数側は defineSecret("KEY") で参照し、
+#           ランタイム SA への accessor 付与は firebase deploy が行う（env-sync は触らない）。
+#           secret: true のエントリのみ同期（2nd gen の平文 env は functions/.env が管理するため）
 #
 #   ---- Cloudflare Workers ----
 #           必須環境変数: CLOUDFLARE_API_TOKEN（Workers Scripts:Edit 権限）

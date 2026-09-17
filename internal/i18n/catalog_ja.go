@@ -331,6 +331,7 @@ YAML スキーマ（定義ファイル env-sync.yaml）:
 
 	// ----- GCP Provider -----
 	MsgGCPProjectIDMissing:      "GCP_PROJECT_ID が未設定です",
+	MsgFirebaseProjectIDMissing: "FIREBASE_PROJECT_ID / GCP_PROJECT_ID がどちらも未設定です",
 	MsgGCPSkipNotSecret:         "⚠ %s: secret=false のためスキップ（Secret Manager は秘匿値専用）\n",
 	MsgGCPTargetProject:         "対象プロジェクト: %s\n",
 	MsgGCPLabelsNone:            "(labels なし)",

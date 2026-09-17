@@ -1,5 +1,5 @@
 // Command env-sync は、定義ファイル(env-sync.yaml)で宣言した環境変数を
-// Vercel / GitHub Actions / GCP Secret Manager / Cloudflare Workers へ一括登録(同期)する。
+// Vercel / GitHub Actions / GCP Secret Manager / Firebase Functions / Cloudflare Workers へ一括登録(同期)する。
 //
 // 値は定義ファイルには書かず .env(.production) から取得する。
 //
@@ -80,6 +80,12 @@
 //
 //	GCP_PROJECT_ID      Secret Manager の対象 GCP プロジェクト ID
 //	認証: Application Default Credentials（ADC）を使用。gcloud auth application-default login 等で設定する。
+//
+// 必須 (Firebase Functions):
+//
+//	FIREBASE_PROJECT_ID 対象 Firebase プロジェクト ID（未設定なら GCP_PROJECT_ID を使う）
+//	認証: gcp と同じ ADC。実体は Secret Manager への同期で、firebase functions:secrets:set と
+//	      同じ firebase-managed ラベルを付ける。関数側は defineSecret("KEY") で参照する。
 //
 // 必須 (Cloudflare Workers):
 //

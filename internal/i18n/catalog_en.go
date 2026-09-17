@@ -332,6 +332,7 @@ YAML schema (definition file env-sync.yaml):
 
 	// ----- GCP Provider -----
 	MsgGCPProjectIDMissing:      "GCP_PROJECT_ID is not set",
+	MsgFirebaseProjectIDMissing: "neither FIREBASE_PROJECT_ID nor GCP_PROJECT_ID is set",
 	MsgGCPSkipNotSecret:         "⚠ %s: secret=false, skipping (Secret Manager is for secrets only)\n",
 	MsgGCPTargetProject:         "Target project: %s\n",
 	MsgGCPLabelsNone:            "(no labels)",

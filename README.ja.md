@@ -2,12 +2,13 @@
 
 [English](README.md) | 日本語
 
-定義ファイル `env-sync.yaml` で宣言した環境変数を **Vercel** / **GitHub Actions** / **GCP Secret Manager** / **Cloudflare Workers** へ一括登録（同期）する Go 製 CLI。
+定義ファイル `env-sync.yaml` で宣言した環境変数を **Vercel** / **GitHub Actions** / **GCP Secret Manager** / **Firebase Functions** / **Cloudflare Workers** へ一括登録（同期）する Go 製 CLI。
 1 つの定義ファイルから、変数ごとに同期先を選んで複数のプロバイダーへまとめて反映できる。
 
 - **Vercel**: REST API (`POST /v10/projects/{id}/env?upsert=true`) を使うため、再実行すると既存の変数は **更新（upsert）** される。
 - **GitHub Actions**: Secrets（sealed box 暗号化）と Variables（平文）の両方に対応する。
 - **GCP Secret Manager**: 実行ごとに Secret のバージョンを追加する。`secret: true` のエントリのみ同期する。
+- **Firebase Functions**: 2nd gen の `defineSecret()` が読むシークレットを登録する（実体は GCP Secret Manager。[Firebase Functions へ同期](#6-firebase-functions-へ同期)を参照）。
 - **Cloudflare Workers**: REST API で Worker Secrets を登録する。`secret: true` のエントリのみ同期する（[Cloudflare Workers へ同期](#5-cloudflare-workers-へ同期)を参照）。
 
 ## 仕組み
@@ -298,7 +299,45 @@ env-sync --provider cloudflare --env .env.production --cloudflare-script cron
 env-sync validate --provider cloudflare
 ```
 
-## 6. 複数プロバイダーを混在させる
+## 6. Firebase Functions へ同期
+
+Cloud Functions for Firebase（2nd gen）のシークレットは、実体が **同じプロジェクトの GCP Secret Manager 上の Secret** です。`firebase functions:secrets:set KEY` は Secret を作って `firebase-managed` ラベルを付けているだけなので、`--provider firebase` はそれと同じことを `.env` から一括で行います。
+
+```bash
+export FIREBASE_PROJECT_ID=my-firebase-project   # 未設定なら GCP_PROJECT_ID を使う
+gcloud auth application-default login            # 認証は gcp と同じ ADC
+
+env-sync --provider firebase --dry-run
+env-sync --provider firebase
+```
+
+関数側はこれまで通り `defineSecret()` で参照します。
+
+```ts
+import { defineSecret } from "firebase-functions/params";
+import { onRequest } from "firebase-functions/v2/https";
+
+const apiSecret = defineSecret("API_SECRET");
+
+export const api = onRequest({ secrets: [apiSecret] }, (req, res) => {
+  res.send(apiSecret.value());
+});
+```
+
+### `gcp` との違い
+
+`firebase` は `gcp` に以下を足しただけのプロバイダーです。
+
+- Secret に `firebase-managed=functions` ラベルを付ける（`firebase functions:secrets:set` が付けるのと同じもの）。これが無いと `firebase functions:secrets:*` 側から「Firebase が管理していない Secret」として扱われ、操作のたびに確認を求められます。
+- プロジェクト ID を `FIREBASE_PROJECT_ID` → `GCP_PROJECT_ID` の順で解決する。
+
+### 注意点
+
+- **`secret: true` のエントリのみ同期します。** 2nd gen の平文 env は `functions/.env` 系のファイルを Firebase CLI がデプロイ時に読む方式で、API から書ける置き場所がありません。`secret: false` の変数は警告のうえスキップされます。
+- **ランタイムサービスアカウントへの `secretmanager.secretAccessor` 付与は `firebase deploy` が行います。** env-sync は IAM を触りません。同期後に一度 `firebase deploy --only functions` を実行してください。
+- **古いバージョンの破棄は行いません。** env-sync は実行ごとに新しい Secret バージョンを追加します。不要になったバージョンは `firebase functions:secrets:prune` で整理してください。
+
+## 7. 複数プロバイダーを混在させる
 
 変数ごとに `provider` を指定すると、1 つの `env-sync.yaml` から Vercel と GitHub Actions の両方へ同時に同期できます。
 
@@ -334,7 +373,7 @@ VERCEL_TOKEN=xxxxx GITHUB_TOKEN=yyyyy env-sync --env .env.production
 
 不正な値（`vercel` / `github` 以外）を指定するとエラーで中止します。`--dry-run` では各変数の `providers` 列で振り分け先を確認できます。
 
-## 7. config ファイルで認証情報・ID を管理する
+## 8. config ファイルで認証情報・ID を管理する
 
 環境変数の代わりに YAML ファイルでトークンや ID を管理できます。毎回 `VERCEL_TOKEN=...` を渡す手間を省けます。
 
@@ -600,14 +639,14 @@ variables:
 - `prune_exclude` の glob パターンに一致するキーは保持されます（大文字小文字非区別）。
 - **Vercel**: システム変数と、インテグレーションが作成した変数（Blob Store・Marketplace 連携などで `configurationId` を持つもの）は自動で除外されます。
 - **GitHub**: Actions Secrets / Variables を、repo レベルと定義ファイルに現れる named environment のスコープで削除します。
-- **GCP**: `managed-by=env-sync` ラベル付き Secret のみ削除対象です。このラベルは env-sync が同期時に自動付与するため、env-sync 以外が作成した Secret には触れません。
+- **GCP / Firebase**: `managed-by=env-sync` ラベル付き Secret のみ削除対象です。このラベルは env-sync が同期時に自動付与するため、env-sync 以外が作成した Secret（`firebase functions:secrets:set` で作ったものを含む）には触れません。
 - **Cloudflare**: 定義ファイルが対象とするスクリプトの Worker Secrets のみ削除対象です。その実行に現れない Worker のシークレットには触れません。
 
 ## オプション / 環境変数
 
 | 項目 | 必須 | 説明 |
 |------|------|------|
-| `--provider <name>` | – | 同期先（デフォルト `vercel`）。現在 `vercel` / `github` / `gcp` / `cloudflare` が利用可 |
+| `--provider <name>` | – | 同期先（デフォルト `vercel`）。現在 `vercel` / `github` / `gcp` / `firebase` / `cloudflare` が利用可 |
 | `--vercel-project <name>` | – | 同期対象を config の `vercel.projects[].name` 1 件に絞る。未指定なら定義済み全プロジェクト |
 | `--github-repo <name>` | – | 同期対象を config の `github.repos[].name` 1 件に絞る。未指定なら定義済み全リポジトリ |
 | `--cloudflare-script <name>` | – | 同期対象を config の `cloudflare.scripts[].name` 1 件に絞る。未指定なら定義済み全 Worker |
@@ -623,6 +662,8 @@ variables:
 | `VERCEL_TEAM_ID` | –(Vercel) | チーム(Org) ID。未指定なら config ファイルまたは `.vercel/project.json` の `orgId` |
 | `GITHUB_TOKEN` | ◯(GitHub) | GitHub アクセストークン（dry-run 時は不要） |
 | `GITHUB_REPO` | –(GitHub) | `owner/repo` 形式。未指定なら config ファイルまたは `git remote origin` から自動取得 |
+| `GCP_PROJECT_ID` | ◯(GCP) | Secret Manager の対象 GCP プロジェクト ID。認証は ADC |
+| `FIREBASE_PROJECT_ID` | ◯(Firebase) | 対象 Firebase プロジェクト ID。未設定なら `GCP_PROJECT_ID` にフォールバック |
 | `CLOUDFLARE_API_TOKEN` | ◯(Cloudflare) | Workers Scripts:Edit 権限を持つ API トークン（dry-run 時は不要） |
 | `CLOUDFLARE_ACCOUNT_ID` | ◯(Cloudflare) | 対象アカウント ID。未指定なら config ファイルの `cloudflare.account_id`。dry-run 時は不要だが、無い場合は新規/更新の判定が表示されない |
 | `CLOUDFLARE_SCRIPT_NAME` | –(Cloudflare) | Worker スクリプト名。未指定なら config ファイルまたは wrangler 設定の `name` |
